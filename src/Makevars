@@ -1,0 +1,6 @@
+# Makevars portable: sin flags de arquitectura especifica y sin pthread.
+# El motor matematico corre en modo secuencial (threads = 1), por lo que
+# solo se requiere la libreria matematica estandar.
+
+PKG_CFLAGS = -I. -O2
+PKG_LIBS   = -lm

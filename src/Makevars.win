@@ -1,0 +1,4 @@
+# Equivalente para Windows/Rtools (mingw-w64), igualmente minimalista.
+
+PKG_CFLAGS = -I. -O2
+PKG_LIBS   = -lm
