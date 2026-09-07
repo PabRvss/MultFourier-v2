@@ -179,7 +179,8 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
     result_t* vec_arrs = malloc(threads*(N+1)*sizeof(result_t));
     complex double* res_arr = malloc(max_iter*step*sizeof(complex double));
 
-    const double threshold = 1 + options->eps_rel/CONV_COUNT;
+    const int_t B = options->B;
+    const double threshold = (B > 0) ? (1 + options->eps_rel/(double)B) : 1.0;
     double delta_acc = 0;
     double delta_acc_im = 0;
     int_t terms_acc = 0;
@@ -246,7 +247,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
             converged_count = converged ? converged_count + 1 : 0;
             p_prev = p;
 
-            if (converged_count >= CONV_COUNT) {
+            if (B > 0 && converged_count >= B) {
                 if (verbose) {
                     printf("*%04lld\t%.10e\t%.10e\n", iter, p, delta_acc);
                 }

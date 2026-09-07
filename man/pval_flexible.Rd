@@ -2,60 +2,52 @@
 % Please edit documentation in R/pvalues.R
 \name{pval_flexible}
 \alias{pval_flexible}
-\title{Compute p-value for a Multinomial Test}
+\title{Calculo de p-valor mediante metodo flexible}
 \usage{
 pval_flexible(
   x,
-  p,
-  stat = "prob",
-  lambda = 0,
-  max_time = 600,
-  max_terms = 300,
+  p = rep(1/length(x), length(x)),
+  precision = c("double", "double-double"),
+  precompute = TRUE,
   rel_eps = 0.001,
-  undersampling = 1,
-  verbose = FALSE
+  max_terms = 10000,
+  B = 30,
+  threads = 2,
+  verbose = FALSE,
+  tau = NULL,
+  max_L = NULL,
+  max_time = NULL
 )
 }
 \arguments{
-\item{x}{Vector entero con las realizaciones de cada categoria.}
+\item{x}{Vector de conteos observados en cada categoria.}
 
-\item{p}{Vector numerico con las probabilidades de cada categoria (no
-negativas y que sumen uno). Debe tener el mismo largo que `x`.}
+\item{p}{Vector de probabilidades teoricas bajo la hipotesis nula (suman 1).}
 
-\item{stat}{Nombre del estadistico a calcular: "prob" (default),
-"pearson", "llr" o "power_div".}
+\item{precision}{Precision aritmetica: "double" (estandar) o "double-double" (alta precision).}
 
-\item{lambda}{Numerico con el valor lambda del estadistico de
-Power-Divergence. Solo se usa si `stat = "power_div"`.}
+\item{precompute}{Logico; si TRUE, usa precomputo de transformadas para aceleracion.}
 
-\item{max_time}{Tiempo maximo en segundos. Por defecto 600.}
+\item{rel_eps}{Tolerancia relativa de convergencia (tau >= 0, default 1e-3).}
 
-\item{max_terms}{Numero maximo de terminos de la serie de Fourier. Por
-defecto 300.}
+\item{max_terms}{Numero maximo de armonicos a evaluar en la serie (max_L, entero positivo, default 10000).}
 
-\item{rel_eps}{Tolerancia de error relativo. Por defecto 0.001.}
+\item{B}{Entero >= 0; cantidad de terminos consecutivos requeridos para convergencia (default 30). Si B = 0, no se aplica parada temprana.}
 
-\item{undersampling}{Factor de submuestreo. Por defecto 1.}
+\item{threads}{Cantidad de hilos de ejecucion (maximo 2 bajo politicas CRAN).}
 
-\item{verbose}{Logico; si `TRUE`, imprime resultados intermedios.}
+\item{verbose}{Logico; si TRUE, imprime informacion del progreso.}
+
+\item{tau}{Alias opcional para rel_eps.}
+
+\item{max_L}{Alias opcional para max_terms.}
+
+\item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
 }
 \value{
-Un objeto `list` con los elementos `pval`, `converged`, `terms`
-  y `p0`.
+Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, gamma, n_terms, time, p0, status, message y method.
 }
 \description{
-Calcula el p-value para un test Multinomial exacto, Chi-Cuadrado de
-Pearson, razon de verosimilitud logaritmica, o de Power-Divergence.
-Usa enumeracion completa si la cardinalidad del soporte de la
-distribucion Multinomial es menor a 10^6; en caso contrario, usa el
-metodo de Fourier.
-}
-\examples{
-probs <- c(0.00040161, 0.00080321, 0.00200803, 0.00401606, 0.00682731,
-           0.01044177, 0.01485944, 0.02008032, 0.02610442, 0.03293173,
-           0.04056225, 0.04899598, 0.05823293, 0.06827309, 0.07911647,
-           0.09076305, 0.10321285, 0.11646586, 0.13052209, 0.14538153)
-x0 <- rep(10, length(probs))
-result <- pval_flexible(x0, probs, max_terms = 300, verbose = TRUE)
-print(result)
+Evalua si la dimension del soporte multinomial permite enumeracion exacta
+(biseccion iterativa) o si deriva al metodo de inversion de Fourier.
 }

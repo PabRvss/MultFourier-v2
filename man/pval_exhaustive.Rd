@@ -2,44 +2,33 @@
 % Please edit documentation in R/pvalues.R
 \name{pval_exhaustive}
 \alias{pval_exhaustive}
-\title{Compute p-value using an exhaustive method}
+\title{Calculo exacto de p-valor mediante biseccion iterativa}
 \usage{
 pval_exhaustive(
   x,
-  p,
-  stat = "prob",
-  lambda = 0,
-  max_time = 600,
-  verbose = FALSE
+  p = rep(1/length(x), length(x)),
+  threads = 1,
+  verbose = FALSE,
+  max_time = NULL,
+  ...
 )
 }
 \arguments{
-\item{x}{Vector entero con las realizaciones de cada categoria.}
+\item{x}{Vector de conteos observados.}
 
-\item{p}{Vector numerico con las probabilidades de cada categoria (no
-negativas y que sumen uno). Debe tener el mismo largo que `x`.}
+\item{p}{Vector de probabilidades teoricas bajo la hipotesis nula.}
 
-\item{stat}{Nombre del estadistico a calcular: "prob" (default),
-"pearson", "llr" o "power_div".}
+\item{threads}{Cantidad de hilos a usar (maximo 2).}
 
-\item{lambda}{Numerico con el valor lambda del estadistico de
-Power-Divergence. Solo se usa si `stat = "power_div"`.}
+\item{verbose}{Logico; si TRUE, imprime informacion del proceso.}
 
-\item{max_time}{Tiempo maximo en segundos. Por defecto 600.}
+\item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
 
-\item{verbose}{Logico; si `TRUE`, imprime resultados intermedios.}
+\item{...}{Parametros adicionales ignorados (compatibilidad).}
 }
 \value{
-Un objeto `list` con los elementos `pval`, `converged`, `terms`
-  y `p0`.
+Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, gamma, n_terms, time, p0, status, message y method.
 }
 \description{
-Calcula el p-value evaluando todos los elementos del soporte de la
-distribucion Multinomial. Recomendado solo para instancias pequenas.
-}
-\examples{
-probs <- c(0.1, 0.2, 0.3, 0.4)
-x0 <- rep(10, 4)
-result <- pval_exhaustive(x0, probs, verbose = TRUE)
-print(result)
+Calculo exacto de p-valor mediante biseccion iterativa
 }

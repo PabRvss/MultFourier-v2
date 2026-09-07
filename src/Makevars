@@ -2,5 +2,5 @@
 # El motor matematico corre en modo secuencial (threads = 1), por lo que
 # solo se requiere la libreria matematica estandar.
 
-PKG_CFLAGS = -I. -O2
-PKG_LIBS   = -lm
+PKG_CFLAGS = $(SHLIB_OPENMP_CFLAGS) -std=c11
+PKG_LIBS = $(SHLIB_OPENMP_CFLAGS) -lm -lpthread
