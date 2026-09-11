@@ -16,7 +16,11 @@ static inline real_t reward_primes(const int_t k, const int_t xk) {  // probabil
     return xk*log_primes[k];
 }
 
+#if defined(__GNUC__) && !defined(__clang__)
 __attribute__((optimize("no-fast-math"), noinline))
+#elif defined(__clang__)
+__attribute__((noinline))
+#endif
 static real_t reward_power(const int_t N, const int_t k, const real_t log_pk, const int_t xk, const real_t lambda) {  // Power divergence statistic (general lambda)
 //    return reward_primes(k, xk);
 

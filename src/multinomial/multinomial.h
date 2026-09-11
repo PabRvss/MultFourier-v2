@@ -15,6 +15,7 @@ typedef struct {
     double p0;
     real_t r0;
     real_t T;
+    real_t W;
     real_t gamma;
     real_t l_rate;
 } multinomial;
@@ -25,11 +26,14 @@ typedef struct {
     int_t terms;
     double p0;
     double eval_time;
+    double total_time;
     double err_rel_est;
     double n_eff;
     double nu_max_ratio;
     int_t nu_at_max;
     double gamma;
+    double W;
+    int_t status;
     int_t method;
 } multinomial_result;
 
@@ -134,6 +138,7 @@ static void fill_interval(multinomial* mult, const options_t* options) {
     const real_t W_max = MAX(s_max, -s_min);
     const real_t W_eff = W_max/options->undersampling;
 
+    mult->W = W_eff;
     mult->T = W_eff == 0? 1.0 : M_PI/W_eff;
     free(arr_min);
     free(arr_max);
@@ -375,6 +380,9 @@ static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const op
 
     finish:
     mult->gamma = gamma;
+    if (isnan(gamma) || !isfinite(gamma)) {
+        mult_res->status = 3; // Could not solve the optimization of gamma
+    }
     if (N == 0) mult->l_rate = 0;
 
     free(gammas);
@@ -411,6 +419,7 @@ static void fill_mult1(multinomial* mult, multinomial_result* mult_res, const in
 
 static void fill_mult2(multinomial* mult, multinomial_result* mult_res, const int_t* restrict x0, const options_t* options) {
     fill_interval(mult, options);
+    mult_res->W = mult->W;
     fill_gamma(mult, mult_res, options);
     fill_cells(mult);
 }

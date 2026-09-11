@@ -15,7 +15,7 @@ typedef struct {
     const multinomial* mult;
     local_t* restrict local;
     result_t* restrict vec_arr;
-    complex_t* restrict res_arr;
+    qcomplex_t* restrict res_arr;
     const void* restrict plan;
     int_t thread;
     int_t start;
@@ -40,7 +40,7 @@ static void* eval_fourier_thread(void* args_void) {
     const cell_t* restrict global = mult->matrix;
     local_t* restrict local = args->local;
     result_t* restrict vec_arr = args->vec_arr;
-    complex_t* restrict res_arr = args->res_arr;
+    qcomplex_t* restrict res_arr = args->res_arr;
 
     const int_t N = mult->N;
     const int_t K = mult->K;
@@ -96,7 +96,7 @@ static void* eval_fourier_thread(void* args_void) {
         }
 
         const real_t s2_re = M_PI*mult->gamma/mult->T;
-        const double resN_exp = exp((double)vec_arr[N].log_mod + lgac[N]);
+        const quad_t resN_exp = exp_quad(vec_arr[N].log_mod + lgac[N]);
 #ifdef USE_SIMD
         vec_t s2_im; for (int_t i=0; i<STRIDE; i++) s2_im[i] = (n*STRIDE + i)*M_PI;
         for (int_t i=0; i<STRIDE; i++) {
@@ -132,7 +132,7 @@ static void* (*select_fourier_eval_fn(const options_t* restrict options))(void*)
 static void eval_fourier_parallel(
         const multinomial* restrict mult, const int_t n_min, const int_t n_max,
         local_t* restrict local_arrs, result_t* restrict vec_arrs,
-        complex_t* res_arr, options_t* options, const void* restrict plan
+        qcomplex_t* res_arr, options_t* options, const void* restrict plan
 ) {
     const int_t threads = options->threads;
     const int_t N = mult->N;
@@ -166,7 +166,7 @@ static void eval_fourier_parallel(
 static void eval_fourier_sequential(
         const multinomial* restrict mult, const int_t n_min, const int_t n_max,
         local_t* restrict local_arrs, result_t* restrict vec_arrs,
-        complex_t* res_arr, options_t* options, const void* restrict plan
+        qcomplex_t* res_arr, options_t* options, const void* restrict plan
 ) {
     arguments_t args;
     args.mult = mult;
@@ -191,7 +191,8 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
 
     local_t* local_arrs = malloc(threads*(N+1)*sizeof(local_t));
     result_t* vec_arrs = malloc(threads*(N+1)*sizeof(result_t));
-    complex_t* res_arr = malloc(max_chunks*step*sizeof(complex_t));
+    qcomplex_t* res_arr = malloc(max_chunks*step*sizeof(qcomplex_t));
+    quad_t* sums_arr = malloc(max_chunks*step*sizeof(quad_t));
 
     void* plan = NULL;
     if (options->use_fft_precompute) {
@@ -206,21 +207,36 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
     }
 
     const int_t B = options->B;
-    const double threshold = (B > 0) ? (options->eps_rel / (double)B) : 0.0;
-    double p = 0;
-    long double c = 0;
-    double f = 0;
+    const quad_t threshold = (B > 0) ? (options->eps_rel / (quad_t)B) : 0.0;
+    quad_t p = 0;
+    quad_t c = 0;
+    quad_t f = 0;
     int converged_full = 0;
     int_t converged_count = 0;
-    double p_prev = INFINITY;
+    quad_t p_prev = INFINITY;
 
     err_diag_t diag;
     err_diag_init(&diag, max_chunks*step);
     int_t iter = 0;
 
+    struct timespec t_series_start;
+    timespec_get(&t_series_start, TIME_UTC);
+
     for (int_t n=0; n < max_chunks; n++) {
-        if (!isfinite(p) || isnan(p)) {
+        /* Check max_time after each chunk */
+        if (options->max_time > 0.0 && isfinite(options->max_time)) {
+            struct timespec t_now;
+            timespec_get(&t_now, TIME_UTC);
+            if (get_dt(t_series_start, t_now) >= options->max_time) {
+                mult_res->status = 1; // Maximum time reached
+                goto finish;
+            }
+        }
+
+        /* Check for numerical explosion */
+        if (!finiteq_quad(p) || isnanq_quad(p) || fabsq_quad(p) > 1e100) {
             p = NAN;
+            mult_res->status = 4; // Magnitude explosion / numerical instability
             converged_full = 0;
             goto finish;
         }
@@ -235,38 +251,72 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
         if (n==0) {
             if (res_arr[0] == 0.0) {
                 p = 0;
+                sums_arr[0] = 0;
                 converged_full = 1;
+                mult_res->status = 0; // Converged
                 goto finish;
             }
             res_arr[0] /= 2;
         }
 
         for (iter=n_min*STRIDE; (iter<n_max*STRIDE) && (iter<options->max_iter); iter++) {
-            const double delta_re = creal(res_arr[iter]);
-            const double y = delta_re - c;
-            const double t = f + y;
+            const quad_t delta_re = crealq_quad(res_arr[iter]);
+            if (!finiteq_quad(delta_re) || isnanq_quad(delta_re) || fabsq_quad(delta_re) > 1e100) {
+                p = NAN;
+                mult_res->status = 4; // Magnitude explosion
+                converged_full = 0;
+                goto finish;
+            }
+
+            const quad_t y = delta_re - c;
+            const quad_t t = f + y;
             c = (t - f) - y;
             f = t;
             p = f;
+            sums_arr[iter] = p;
 
-            const double frac = ABS(delta_re/p_prev);
+            const quad_t frac = fabsq_quad(delta_re/p_prev);
             const int converged = (B > 0) && (p > 0.0) && (frac <= threshold);
             converged_count = converged ? converged_count + 1 : 0;
             p_prev = p;
 
             if (B > 0 && converged_count >= B) {
                 converged_full = 1;
+                mult_res->status = 0; // Converged
                 goto finish;
             }
         }
     }
 
     finish:
+    /* Windowed series averaging to dampen Gibbs oscillations */
+    if (iter > 0 && options->average_window > 0.0) {
+        quad_t p_average = 0;
+        double weight = 0.0;
+        const int_t window = (int_t)(options->average_window * iter);
+        for (int_t i=0; i<=window; i++) {
+            const int_t j = iter - window + i;
+            if (j >= 0) {
+                const double w = options->average_flat ? 1.0 : (double)(i + 1);
+                p_average += sums_arr[j] * w;
+                weight += w;
+            }
+        }
+        if (weight > 0.0) {
+            p_average /= weight;
+            p = p_average;
+        }
+    }
+
     p += mult->p0/2;
 
-    mult_res->pval = p;
+    mult_res->pval = (double)p;
     mult_res->converged = converged_full;
     mult_res->terms = iter;
+
+    if (!converged_full && mult_res->status == 0) {
+        mult_res->status = 2; // Maximum number of terms reached
+    }
 
     mult_res->err_rel_est = NAN;
     mult_res->n_eff = NAN;
@@ -274,7 +324,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
     mult_res->nu_at_max = -1;
     if (options->error_bound) {
         int_t n_at = -1;
-        mult_res->err_rel_est = err_rel_estimate(&diag, p, mult->gamma, mult->T);
+        mult_res->err_rel_est = err_rel_estimate(&diag, (double)p, mult->gamma, mult->T);
         mult_res->n_eff = err_n_eff(&diag);
         mult_res->nu_max_ratio = err_max_revival(&diag, &n_at);
         mult_res->nu_at_max = n_at;
@@ -295,4 +345,5 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
     free(local_arrs);
     free(vec_arrs);
     free(res_arr);
+    free(sums_arr);
 }

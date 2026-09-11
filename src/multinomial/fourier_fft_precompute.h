@@ -96,7 +96,7 @@ typedef struct {
     int_t N;
     int_t calls_per_round;   // number of merge call-sites in one category round (same every k)
     merge_t* restrict factors;  // K * calls_per_round, in call order
-    real_t resN_exp;         // exp(A[N].log_mod - l_prev*N + lgac[N]) after all K rounds
+    quad_t resN_exp;         // exp(A[N].log_mod - l_prev*N + lgac[N]) after all K rounds
 } fourier_fft_plan_t;
 
 static int_t fourier_fft_count_calls(const int_t M) {
@@ -225,7 +225,7 @@ static fourier_fft_plan_t* build_fourier_fft_plan(const multinomial* restrict mu
         C = temp;
     }
 
-    plan->resN_exp = exp((double)A[N] - (double)(l_prev*(real_t)N) + lgac[N]);
+    plan->resN_exp = exp_quad(A[N] - l_prev*(real_t)N + lgac[N]);
 
     free(l_rate);
     free(A);
@@ -246,7 +246,7 @@ static void* eval_fourier_fft_precompute_thread(void* args_void) {
     const multinomial* restrict mult = args->mult;
     const cell_t* restrict global = mult->matrix;
     const fourier_fft_plan_t* restrict plan = args->plan;
-    complex_t* restrict res_arr = args->res_arr;
+    qcomplex_t* restrict res_arr = args->res_arr;
 
     const int_t N = mult->N;
     const int_t K = mult->K;

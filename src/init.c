@@ -5,14 +5,10 @@
 
 extern void free_ext(void);
 
-extern SEXP c_pval_fourier(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
-extern SEXP c_pval_exhaustive(SEXP, SEXP, SEXP, SEXP);
-extern SEXP c_pval_flexible(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP c_run_multfourier(SEXP, SEXP, SEXP);
 
 static const R_CallMethodDef CallEntries[] = {
-    {"c_pval_fourier",    (DL_FUNC) &c_pval_fourier,    9},
-    {"c_pval_exhaustive", (DL_FUNC) &c_pval_exhaustive, 4},
-    {"c_pval_flexible",   (DL_FUNC) &c_pval_flexible,   9},
+    {"c_run_multfourier", (DL_FUNC) &c_run_multfourier, 3},
     {NULL, NULL, 0}
 };
 

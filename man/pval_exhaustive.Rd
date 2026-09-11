@@ -7,9 +7,11 @@
 pval_exhaustive(
   x,
   p = rep(1/length(x), length(x)),
-  threads = 1,
-  verbose = FALSE,
+  stat = c("pd", "chi2", "llr", "pmf"),
+  lambda = 1,
+  n_threads = 1,
   max_time = NULL,
+  verbose = FALSE,
   ...
 )
 }
@@ -18,16 +20,20 @@ pval_exhaustive(
 
 \item{p}{Vector de probabilidades teoricas bajo la hipotesis nula.}
 
-\item{threads}{Cantidad de hilos a usar (maximo 2).}
+\item{stat}{Estadistico de prueba: \code{"pd"}, \code{"chi2"}, \code{"llr"}, o \code{"pmf"}. Por defecto \code{"pd"}.}
 
-\item{verbose}{Logico; si TRUE, imprime informacion del proceso.}
+\item{lambda}{Parametro real para Power Divergence cuando \code{stat = "pd"}. Por defecto 1.}
+
+\item{n_threads}{Cantidad de hilos a usar (entero >= 1). Por defecto 1.}
 
 \item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
 
-\item{...}{Parametros adicionales ignorados (compatibilidad).}
+\item{verbose}{Logico; si TRUE, imprime informacion del proceso.}
+
+\item{...}{Parametros adicionales pasados al motor de C.}
 }
 \value{
-Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, gamma, n_terms, time, p0, status, message y method.
+Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
 }
 \description{
 Calculo exacto de p-valor mediante biseccion iterativa

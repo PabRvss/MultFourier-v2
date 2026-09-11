@@ -72,7 +72,7 @@ static void err_diag_free(err_diag_t* restrict d) {
 // Accumulate over res_arr[n_lo .. n_hi-1]. Must be called on the RAW terms, before series()
 // halves res_arr[0].
 static void err_diag_accum(
-        err_diag_t* restrict d, const complex_t* restrict res_arr,
+        err_diag_t* restrict d, const qcomplex_t* restrict res_arr,
         const int_t n_lo, const int_t n_hi, const real_t gamma, const real_t T
 ) {
     for (int_t n=n_lo; n<n_hi && n<d->cap; n++) {

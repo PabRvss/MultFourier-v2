@@ -7,16 +7,20 @@
 pval_flexible(
   x,
   p = rep(1/length(x), length(x)),
-  precision = c("double", "double-double"),
-  precompute = TRUE,
+  stat = c("pd", "chi2", "llr", "pmf"),
+  lambda = 1,
+  undersampling = 1,
+  avg_window = 0,
+  avg_flat = FALSE,
   rel_eps = 0.001,
   max_terms = 10000,
   B = 30,
-  threads = 2,
+  n_threads = min(2L, parallel::detectCores()),
+  precision = c("double", "double-double"),
+  precompute = TRUE,
+  max_time = NULL,
   verbose = FALSE,
-  tau = NULL,
-  max_L = NULL,
-  max_time = NULL
+  ...
 )
 }
 \arguments{
@@ -24,28 +28,36 @@ pval_flexible(
 
 \item{p}{Vector de probabilidades teoricas bajo la hipotesis nula (suman 1).}
 
+\item{stat}{Estadistico de prueba: \code{"pd"} (Power Divergence), \code{"chi2"} (Chi-cuadrado), \code{"llr"} (Log-Likelihood Ratio), o \code{"pmf"} (Probabilidad multinomial puntual). Por defecto \code{"pd"}.}
+
+\item{lambda}{Parametro real para Power Divergence cuando \code{stat = "pd"}. Por defecto 1.}
+
+\item{undersampling}{Factor de submuestreo (> 0) para el periodo en la serie de Fourier. Por defecto 1.}
+
+\item{avg_window}{Fraccion de sumas parciales finales a promediar (entre 0 y 1). Por defecto 0.}
+
+\item{avg_flat}{Logico; si TRUE usa promedio plano; si FALSE pondera linealmente segun proximidad al final. Por defecto FALSE.}
+
+\item{rel_eps}{Tolerancia relativa de convergencia (>= 0). Por defecto 1e-3.}
+
+\item{max_terms}{Numero maximo de armonicos a evaluar en la serie (entero positivo). Por defecto 10000.}
+
+\item{B}{Entero >= 0; cantidad de terminos consecutivos requeridos para convergencia. Por defecto 30.}
+
+\item{n_threads}{Cantidad de hilos de ejecucion (entero positivo >= 1). Por defecto \code{min(2L, parallel::detectCores())}.}
+
 \item{precision}{Precision aritmetica: "double" (estandar) o "double-double" (alta precision).}
 
 \item{precompute}{Logico; si TRUE, usa precomputo de transformadas para aceleracion.}
 
-\item{rel_eps}{Tolerancia relativa de convergencia (tau >= 0, default 1e-3).}
-
-\item{max_terms}{Numero maximo de armonicos a evaluar en la serie (max_L, entero positivo, default 10000).}
-
-\item{B}{Entero >= 0; cantidad de terminos consecutivos requeridos para convergencia (default 30). Si B = 0, no se aplica parada temprana.}
-
-\item{threads}{Cantidad de hilos de ejecucion (maximo 2 bajo politicas CRAN).}
+\item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
 
 \item{verbose}{Logico; si TRUE, imprime informacion del progreso.}
 
-\item{tau}{Alias opcional para rel_eps.}
-
-\item{max_L}{Alias opcional para max_terms.}
-
-\item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
+\item{...}{Parametros adicionales internos pasados al motor de C.}
 }
 \value{
-Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, gamma, n_terms, time, p0, status, message y method.
+Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
 }
 \description{
 Evalua si la dimension del soporte multinomial permite enumeracion exacta

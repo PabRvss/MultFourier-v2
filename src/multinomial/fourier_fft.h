@@ -210,9 +210,9 @@ static void* eval_fourier_fft_thread(void* args_void) {
             C = temp;
         }
 
-        complex_t* restrict res_arr = args->res_arr;
+        qcomplex_t* restrict res_arr = args->res_arr;
         const real_t s2_re = M_PI*mult->gamma/mult->T;
-        const double resN_exp = exp((double)A[N].log_mod - (double)(l_prev*(real_t)N) + lgac[N]);
+        const quad_t resN_exp = exp_quad(A[N].log_mod - l_prev*(real_t)N + lgac[N]);
 #ifdef USE_SIMD
         vec_t s2_im; for (int_t i=0; i<STRIDE; i++) s2_im[i] = (n*STRIDE + i)*M_PI;
 
@@ -374,9 +374,9 @@ static void* eval_fourier_fft_sp_thread(void* args_void) {
             C = temp;
         }
 
-        complex_t* restrict res_arr = args->res_arr;
+        qcomplex_t* restrict res_arr = args->res_arr;
         const real_t s2_re = M_PI*mult->gamma/mult->T;
-        const double resN_exp = exp((double)A[N].log_mod - (double)(l_prev*(real_t)N) + lgac[N]);
+        const quad_t resN_exp = exp_quad(A[N].log_mod - l_prev*(real_t)N + lgac[N]);
 #ifdef USE_SIMD
         vec_t s2_im; for (int_t i=0; i<STRIDE; i++) s2_im[i] = (n*STRIDE + i)*M_PI;
 

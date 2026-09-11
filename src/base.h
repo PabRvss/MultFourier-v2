@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
+#include "portability.h"
 
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643383279502884
