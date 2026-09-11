@@ -29,11 +29,19 @@ pval_exhaustive(
 \item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
 
 \item{verbose}{Logico; si TRUE, imprime informacion del proceso.}
-
-\item{...}{Parametros adicionales pasados al motor de C.}
 }
 \value{
-Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
+Returns an S3 object of class \code{"multfourier"} with the following attributes:
+\describe{
+  \item{x}{The input vector of observed realizations for each category.}
+  \item{p}{The input vector of probabilities for each category under the null hypothesis.}
+  \item{pval}{The computed p-value.}
+  \item{stat}{A string describing the test statistic used.}
+  \item{time}{The total execution time of the algorithm in seconds.}
+  \item{status}{The final status ID of the algorithm upon completion (\code{0}: Converged, \code{1}: Maximum time reached).}
+  \item{message}{The finishing status displayed as a human-readable message.}
+  \item{method}{A string with value \code{"exhaustive"}.}
+}
 }
 \description{
 Calculo exacto de p-valor mediante biseccion iterativa

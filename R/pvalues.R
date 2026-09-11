@@ -115,8 +115,29 @@ resolve_n_threads <- function(n_threads) {
 #' @param max_time Tiempo maximo de ejecucion en segundos (opcional).
 #' @param verbose Logico; si TRUE, imprime informacion del progreso.
 #' @param ... Parametros adicionales internos pasados al motor de C.
-#'
-#' @return Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
+#' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
+#' \describe{
+#'   \item{x}{The input vector of observed realizations for each category.}
+#'   \item{p}{The input vector of probabilities for each category under the null hypothesis.}
+#'   \item{pval}{The computed p-value.}
+#'   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
+#'   \item{W}{The effective width of the distribution support interval.}
+#'   \item{stat}{A string describing the test statistic used (e.g. \code{"chi2"}, \code{"llr"}, \code{"pmf"}, or \code{"pd (lambda = ...)"}).}
+#'   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
+#'   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
+#'   \item{time}{The total execution time of the algorithm in seconds.}
+#'   \item{status}{The final status ID of the algorithm upon completion:
+#'     \itemize{
+#'       \item \code{0}: Converged.
+#'       \item \code{1}: Maximum time reached.
+#'       \item \code{2}: Maximum number of terms reached.
+#'       \item \code{3}: Could not solve the optimization of gamma.
+#'       \item \code{4}: Numerical instability detected (magnitude explosion).
+#'     }
+#'   }
+#'   \item{message}{The finishing status displayed as a human-readable message.}
+#'   \item{method}{A string with value \code{"fourier"} or \code{"exhaustive"}.}
+#' }
 #' @useDynLib MultFourier, c_run_multfourier
 #' @export
 pval_flexible <- function(x, p = rep(1/length(x), length(x)),
@@ -180,9 +201,17 @@ pval_flexible <- function(x, p = rep(1/length(x), length(x)),
 #' @param n_threads Cantidad de hilos a usar (entero >= 1). Por defecto 1.
 #' @param max_time Tiempo maximo de ejecucion en segundos (opcional).
 #' @param verbose Logico; si TRUE, imprime informacion del proceso.
-#' @param ... Parametros adicionales pasados al motor de C.
-#'
-#' @return Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
+#' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
+#' \describe{
+#'   \item{x}{The input vector of observed realizations for each category.}
+#'   \item{p}{The input vector of probabilities for each category under the null hypothesis.}
+#'   \item{pval}{The computed p-value.}
+#'   \item{stat}{A string describing the test statistic used.}
+#'   \item{time}{The total execution time of the algorithm in seconds.}
+#'   \item{status}{The final status ID of the algorithm upon completion (\code{0}: Converged, \code{1}: Maximum time reached).}
+#'   \item{message}{The finishing status displayed as a human-readable message.}
+#'   \item{method}{A string with value \code{"exhaustive"}.}
+#' }
 #' @export
 pval_exhaustive <- function(x, p = rep(1/length(x), length(x)),
                             stat = c("pd", "chi2", "llr", "pmf"),
@@ -217,7 +246,29 @@ pval_exhaustive <- function(x, p = rep(1/length(x), length(x)),
 #' Calculo de p-valor mediante inversion de series de Fourier
 #'
 #' @inheritParams pval_flexible
-#' @return Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
+#' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
+#' \describe{
+#'   \item{x}{The input vector of observed realizations for each category.}
+#'   \item{p}{The input vector of probabilities for each category under the null hypothesis.}
+#'   \item{pval}{The computed p-value.}
+#'   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
+#'   \item{W}{The effective width of the distribution support interval.}
+#'   \item{stat}{A string describing the test statistic used (e.g. \code{"chi2"}, \code{"llr"}, \code{"pmf"}, or \code{"pd (lambda = ...)"}).}
+#'   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
+#'   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
+#'   \item{time}{The total execution time of the algorithm in seconds.}
+#'   \item{status}{The final status ID of the algorithm upon completion:
+#'     \itemize{
+#'       \item \code{0}: Converged.
+#'       \item \code{1}: Maximum time reached.
+#'       \item \code{2}: Maximum number of terms reached.
+#'       \item \code{3}: Could not solve the optimization of gamma.
+#'       \item \code{4}: Numerical instability detected (magnitude explosion).
+#'     }
+#'   }
+#'   \item{message}{The finishing status displayed as a human-readable message.}
+#'   \item{method}{A string with value \code{"fourier"}.}
+#' }
 #' @export
 pval_fourier <- function(x, p = rep(1/length(x), length(x)),
                          stat = c("pd", "chi2", "llr", "pmf"),

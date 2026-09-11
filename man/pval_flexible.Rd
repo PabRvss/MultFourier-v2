@@ -57,7 +57,29 @@ pval_flexible(
 \item{...}{Parametros adicionales internos pasados al motor de C.}
 }
 \value{
-Objeto S3 de clase \code{"multfourier"} con los atributos x, p, pval, Time_gamma, W, stat, Gamma, n_terms, time, status, message y method.
+Returns an S3 object of class \code{"multfourier"} with the following attributes:
+\describe{
+  \item{x}{The input vector of observed realizations for each category.}
+  \item{p}{The input vector of probabilities for each category under the null hypothesis.}
+  \item{pval}{The computed p-value.}
+  \item{Time_gamma}{The time spent optimizing gamma in seconds.}
+  \item{W}{The effective width of the distribution support interval.}
+  \item{stat}{A string describing the test statistic used (e.g. \code{"chi2"}, \code{"llr"}, \code{"pmf"}, or \code{"pd (lambda = ...)"}).}
+  \item{Gamma}{The optimal gamma obtained in the first part of the method.}
+  \item{n_terms}{The number of terms of the Fourier sum evaluated.}
+  \item{time}{The total execution time of the algorithm in seconds.}
+  \item{status}{The final status ID of the algorithm upon completion:
+    \itemize{
+      \item \code{0}: Converged.
+      \item \code{1}: Maximum time reached.
+      \item \code{2}: Maximum number of terms reached.
+      \item \code{3}: Could not solve the optimization of gamma.
+      \item \code{4}: Numerical instability detected (magnitude explosion).
+    }
+  }
+  \item{message}{The finishing status displayed as a human-readable message.}
+  \item{method}{A string with value \code{"fourier"} or \code{"exhaustive"}.}
+}
 }
 \description{
 Evalua si la dimension del soporte multinomial permite enumeracion exacta
