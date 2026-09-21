@@ -34,4 +34,36 @@
     #define crealq_quad creal
     #define finiteq_quad isfinite
     #define isnanq_quad isnan
+
+    /* Fallback macros for raw quadmath identifiers */
+    #ifndef expq
+    #define expq exp
+    #endif
+    #ifndef fabsq
+    #define fabsq fabs
+    #endif
+    #ifndef crealq
+    #define crealq creal
+    #endif
+    #ifndef cimagq
+    #define cimagq cimag
+    #endif
+    #ifndef cabsq
+    #define cabsq cabs
+    #endif
+    #ifndef finiteq
+    #define finiteq isfinite
+    #endif
+    #ifndef isnanq
+    #define isnanq isnan
+    #endif
+    #ifndef scalbnq
+    #define scalbnq scalbn
+    #endif
+    #ifndef frexpq
+    #define frexpq frexp
+    #endif
+    #ifndef quadmath_snprintf
+    #define quadmath_snprintf(buf, len, fmt, val) snprintf(buf, len, "%.10e", (double)(val))
+    #endif
 #endif

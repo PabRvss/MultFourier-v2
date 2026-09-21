@@ -1,4 +1,4 @@
 # Equivalente para Windows/Rtools (mingw-w64), igualmente minimalista.
 
-PKG_CFLAGS = -std=c11
-PKG_LIBS = -lm -lpthread
+PKG_CFLAGS = -std=c11 -DENABLE_QUADMATH
+PKG_LIBS = -lm -lpthread -lquadmath

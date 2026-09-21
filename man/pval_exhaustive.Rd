@@ -11,6 +11,7 @@ pval_exhaustive(
   lambda = 1,
   n_threads = 1,
   max_time = NULL,
+  engine = c("speedup", "standard"),
   verbose = FALSE,
   ...
 )
@@ -27,6 +28,8 @@ pval_exhaustive(
 \item{n_threads}{Number of execution threads (integer >= 1). Default is 1.}
 
 \item{max_time}{Maximum execution time in seconds (optional).}
+
+\item{engine}{Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories).}
 
 \item{verbose}{Logical; if TRUE, prints progress information. Default is FALSE.}
 

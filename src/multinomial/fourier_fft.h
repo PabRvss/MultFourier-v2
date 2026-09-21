@@ -101,7 +101,10 @@ static void* eval_fourier_fft_thread(void* args_void) {
     result_t* restrict C = malloc(M*sizeof(result_t));
     complex_t* restrict F = malloc(M*sizeof(complex_t));
 
-    for (int_t n=args->start; n<args->end; n++) {
+    const int_t cells = K*(N+1);
+    if (!args->warm) phase_seed(args, args->start, cells);
+
+    for (int_t n=args->start; n<args->end; n+=args->stride_n) {
         for (int_t i=0; i<M; i++) A[i] = ZERO;
         A[0].log_mod = 0;
 
@@ -115,21 +118,12 @@ static void* eval_fourier_fft_thread(void* args_void) {
             l_prev = l_k;
 
             // Update B for k, scaled by this category's own l_k alone.
+            phase_load(args, index_k, N);
             for (int_t i=0; i<=N; i++) {
                 const int_t index = index_k + i;
-                const real_t rewardT = global[index].reward;
                 B[i].log_mod = global[index].log_prob + l_k*(real_t)i;
-#ifdef USE_SIMD
-                for (int s=0; s<STRIDE; s++) {
-                    const real_t arg = (n*STRIDE + s)*rewardT;
-                    B[i].unit_re[s] = cos(arg);
-                    B[i].unit_im[s] = -sin(arg);
-                }
-#else
-                const real_t arg = n*rewardT;
-                B[i].unit_re = cos(arg);
-                B[i].unit_im = -sin(arg);  // conjugated
-#endif
+                B[i].unit_re = args->local[i].cos;
+                B[i].unit_im = -args->local[i].sin;  // conjugated
             }
             for (int_t i=N+1; i<M; i++) {
                 B[i] = ZERO;
@@ -210,9 +204,11 @@ static void* eval_fourier_fft_thread(void* args_void) {
             C = temp;
         }
 
+        // complex_t* restrict res_arr = args->res_arr;
         qcomplex_t* restrict res_arr = args->res_arr;
         const real_t s2_re = M_PI*mult->gamma/mult->T;
-        const quad_t resN_exp = exp_quad(A[N].log_mod - l_prev*(real_t)N + lgac[N]);
+        // const double resN_exp = exp((double)A[N].log_mod - (double)(l_prev*(real_t)N) + lgac[N]);
+        const quad_t resN_exp = expq(A[N].log_mod - (l_prev*(real_t)N) + lgac[N]);
 #ifdef USE_SIMD
         vec_t s2_im; for (int_t i=0; i<STRIDE; i++) s2_im[i] = (n*STRIDE + i)*M_PI;
 
@@ -231,6 +227,7 @@ static void* eval_fourier_fft_thread(void* args_void) {
         const complex_t unit = A[N].unit_re + I*A[N].unit_im;
         res_arr[n] = resN_exp*(unit*sinc);
 #endif
+        phase_advance(args, cells);
     }
 
     free(A);
@@ -265,7 +262,10 @@ static void* eval_fourier_fft_sp_thread(void* args_void) {
     result_t* restrict C = malloc(M*sizeof(result_t));
     complex_t* restrict F = malloc(M*sizeof(complex_t));
 
-    for (int_t n=args->start; n<args->end; n++) {
+    const int_t cells = K*(N+1);
+    if (!args->warm) phase_seed(args, args->start, cells);
+
+    for (int_t n=args->start; n<args->end; n+=args->stride_n) {
         for (int_t i=0; i<M; i++) A[i] = ZERO;
         A[0].log_mod = 0;
 
@@ -279,21 +279,12 @@ static void* eval_fourier_fft_sp_thread(void* args_void) {
             l_prev = l_k;
 
             // Update B for k, scaled by this category's own l_k alone.
+            phase_load(args, index_k, N);
             for (int_t i=0; i<=N; i++) {
                 const int_t index = index_k + i;
-                const real_t rewardT = global[index].reward;
                 B[i].log_mod = global[index].log_prob + l_k*(real_t)i;
-#ifdef USE_SIMD
-                for (int s=0; s<STRIDE; s++) {
-                    const real_t arg = (n*STRIDE + s)*rewardT;
-                    B[i].unit_re[s] = cos(arg);
-                    B[i].unit_im[s] = -sin(arg);
-                }
-#else
-                const real_t arg = n*rewardT;
-                B[i].unit_re = cos(arg);
-                B[i].unit_im = -sin(arg);  // conjugated
-#endif
+                B[i].unit_re = args->local[i].cos;
+                B[i].unit_im = -args->local[i].sin;  // conjugated
             }
             for (int_t i=N+1; i<M; i++) {
                 B[i] = ZERO;
@@ -374,9 +365,11 @@ static void* eval_fourier_fft_sp_thread(void* args_void) {
             C = temp;
         }
 
+        // complex_t* restrict res_arr = args->res_arr;
         qcomplex_t* restrict res_arr = args->res_arr;
         const real_t s2_re = M_PI*mult->gamma/mult->T;
-        const quad_t resN_exp = exp_quad(A[N].log_mod - l_prev*(real_t)N + lgac[N]);
+        // const double resN_exp = exp((double)A[N].log_mod - (double)(l_prev*(real_t)N) + lgac[N]);
+        const quad_t resN_exp = expq(A[N].log_mod - l_prev*(real_t)N + lgac[N]);
 #ifdef USE_SIMD
         vec_t s2_im; for (int_t i=0; i<STRIDE; i++) s2_im[i] = (n*STRIDE + i)*M_PI;
 
@@ -395,6 +388,7 @@ static void* eval_fourier_fft_sp_thread(void* args_void) {
         const complex_t unit = A[N].unit_re + I*A[N].unit_im;
         res_arr[n] = resN_exp*(unit*sinc);
 #endif
+        phase_advance(args, cells);
     }
 
     free(A);

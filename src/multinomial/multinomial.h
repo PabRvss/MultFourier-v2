@@ -12,7 +12,7 @@ typedef struct {
     const real_t* restrict probs;
     real_t* restrict log_probs;
     cell_t* restrict matrix;
-    double p0;
+    quad_t p0;
     real_t r0;
     real_t T;
     real_t W;
@@ -27,6 +27,7 @@ typedef struct {
     double p0;
     double eval_time;
     double total_time;
+    double err_rel_ext;   // relative error estimate from the extrapolator (see extrapolate.h)
     double err_rel_est;
     double n_eff;
     double nu_max_ratio;
@@ -67,7 +68,7 @@ static void fill_p0(multinomial* mult, const int_t* restrict x0, const options_t
     int_t N = mult->N;
     real_t log_p0 = 0;
     for (int_t k=0; k<K; k++) log_p0 += reward_logp(mult->log_probs[k], x0[k]);
-    mult->p0 = EXP(lgac[N] + (double)log_p0);
+    mult->p0 = expq(lgac[N] + log_p0);
 }
 
 static void fill_probs(multinomial* mult) {
@@ -134,7 +135,6 @@ static void fill_interval(multinomial* mult, const options_t* options) {
 
     const real_t s_min = arr_min[N];
     const real_t s_max = arr_max[N];
-    const real_t width = s_max - s_min;
     const real_t W_max = MAX(s_max, -s_min);
     const real_t W_eff = W_max/options->undersampling;
 
@@ -143,6 +143,17 @@ static void fill_interval(multinomial* mult, const options_t* options) {
     free(arr_min);
     free(arr_max);
 }
+
+#include "interval.h"
+
+static void fill_interval_dispatch(multinomial* mult, const options_t* options) {
+    if (options->fast_interval) {
+        fill_interval_fast(mult, options);
+    } else {
+        fill_interval(mult, options);
+    }
+}
+
 
 typedef struct {
     const vec_t* restrict gammas_vec;
@@ -284,10 +295,12 @@ static void eval_gammas(
     free(args_array);
 }
 
-static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const options_t* options) {
-    struct timespec start, end;
-    timespec_get(&start, TIME_UTC);
+#include "gamma_search.h"
 
+static void fill_gamma_grid(
+        multinomial* mult, multinomial_result* mult_res, const options_t* options,
+        real_t* restrict gamma_out, real_t* restrict final_eval_out, int_t* restrict eval_count_out
+) {
     const int_t N = mult->N;
     const int_t K = mult->K;
     real_t final_eval = NAN;
@@ -364,6 +377,7 @@ static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const op
 
     const int_t i_min = j_min / STRIDE;
     const int_t s_min = j_min % STRIDE;
+    (void)s_min;
 
     mult->l_rate = 0;
     if (gamma_precision == FFT_NONE) {
@@ -388,9 +402,6 @@ static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const op
 
     finish:
     mult->gamma = gamma;
-    if (mult_res->status == 0 && (isnan(gamma) || !isfinite(gamma))) {
-        mult_res->status = 3; // Could not solve the optimization of gamma
-    }
     if (N == 0) mult->l_rate = 0;
 
     free(gammas);
@@ -400,8 +411,51 @@ static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const op
     free(shift_arrs);
     free(l_rate_arr);
 
+    *gamma_out = gamma;
+    *final_eval_out = final_eval;
+    *eval_count_out = eval_count;
+}
+
+static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const options_t* options) {
+    struct timespec start, end;
+    timespec_get(&start, TIME_UTC);
+
+    const int_t N = mult->N;
+    const fft_precision_t gamma_precision = options->fft_precision == FFT_NONE ? FFT_NONE : options->gamma_precision;
+
+    real_t gamma = NAN;
+    real_t final_eval = NAN;
+    int_t eval_count = 0;
+
+    if (!options->gamma_newton) {
+        fill_gamma_grid(mult, mult_res, options, &gamma, &final_eval, &eval_count);
+    }
+    else if (N == 0) {
+        mult->gamma = NAN;
+        mult->l_rate = 0;
+    }
+    else {
+        real_t nu = 0;
+        gamma = gamma_newton_search(mult, -2, 2, options->eps_gamma, &nu, &final_eval, &eval_count);
+        mult->gamma = gamma;
+        mult->l_rate = (gamma_precision == FFT_NONE) ? 0 : nu;
+        if (gamma_precision == FFT_NONE) fill_shifts(mult, gamma);
+    }
+
+    if (mult_res->status == 0 && (isnan(gamma) || !isfinite(gamma))) {
+        mult_res->status = 3; // Could not solve the optimization of gamma
+    }
+
     timespec_get(&end, TIME_UTC);
-    mult_res->eval_time = get_dt(start, end);
+    const double dt = get_dt(start, end);
+    mult_res->eval_time = dt;
+
+    if (options->verbose) {
+        printf("\tgamma = %.6f, %s = %.6f, PI*gamma/T = %.6e\n", mult->gamma,
+               options->gamma_newton ? "saddlepoint obj" : "log MGF(-gamma)",
+               final_eval, M_PI*mult->gamma/mult->T);
+        printf("\t%lld evaluations in %f seconds\n", (long long)eval_count, dt);
+    }
 }
 
 static void fill_cells(multinomial* mult) {
@@ -426,7 +480,7 @@ static void fill_mult1(multinomial* mult, multinomial_result* mult_res, const in
 }
 
 static void fill_mult2(multinomial* mult, multinomial_result* mult_res, const int_t* restrict x0, const options_t* options) {
-    fill_interval(mult, options);
+    fill_interval_dispatch(mult, options);
     mult_res->W = mult->W;
     fill_gamma(mult, mult_res, options);
     fill_cells(mult);

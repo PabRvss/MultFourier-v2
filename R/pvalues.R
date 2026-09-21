@@ -55,6 +55,7 @@ build_multfourier_s3 <- function(raw, x, p, elapsed, requested_method, stat_labe
   }
   
   if (!is.null(raw$err_rel_est)) attr(out, "err_rel_est") <- as.numeric(raw$err_rel_est)
+  if (!is.null(raw$err_rel_ext)) attr(out, "err_rel_ext") <- as.numeric(raw$err_rel_ext)
   if (!is.null(raw$n_eff)) attr(out, "n_eff") <- as.numeric(raw$n_eff)
   if (!is.null(raw$nu_max_ratio)) attr(out, "nu_max_ratio") <- as.numeric(raw$nu_max_ratio)
   
@@ -116,6 +117,7 @@ resolve_n_threads <- function(n_threads) {
 #' @param n_threads Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.
 #' @param precision Arithmetic precision: "double" (standard) or "double-double" (extended precision).
 #' @param precompute Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.
+#' @param engine Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms).
 #' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
 #' @param ... Additional internal parameters passed to the C engine (e.g. \code{enum_cutoff = 7.4}, the threshold for \eqn{\log_{10}} support size under which exact bisection is selected, corresponding to approximately 1 second of execution).
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
@@ -157,6 +159,7 @@ pval_flexible <- function(x,
                           n_threads = min(2L, parallel::detectCores()),
                           precision = c("double", "double-double"),
                           precompute = TRUE,
+                          engine = c("speedup", "standard"),
                           verbose = FALSE,
                           ...) {
   if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
@@ -170,6 +173,7 @@ pval_flexible <- function(x,
   st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
   threads_val <- resolve_n_threads(n_threads)
   precision <- match.arg(precision)
+  engine <- match.arg(engine)
 
   opts <- list(
     method = "flexible",
@@ -184,6 +188,8 @@ pval_flexible <- function(x,
     n_threads = as.integer(threads_val),
     precision = precision,
     precompute = as.logical(precompute),
+    engine = engine,
+    speedup = (engine == "speedup"),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
     verbose = as.logical(verbose),
     ...
@@ -204,6 +210,7 @@ pval_flexible <- function(x,
 #' @param lambda Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.
 #' @param n_threads Number of execution threads (integer >= 1). Default is 1.
 #' @param max_time Maximum execution time in seconds (optional).
+#' @param engine Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories).
 #' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
 #' @param ... Additional internal parameters passed to the C engine.
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
@@ -224,6 +231,7 @@ pval_exhaustive <- function(x,
                             lambda = 1,
                             n_threads = 1,
                             max_time = NULL,
+                            engine = c("speedup", "standard"),
                             verbose = FALSE,
                             ...) {
   if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
@@ -231,12 +239,15 @@ pval_exhaustive <- function(x,
 
   st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
   threads_val <- resolve_n_threads(n_threads)
+  engine <- match.arg(engine)
 
   opts <- list(
     method = "exhaustive",
     stat = st$stat,
     lambda = st$lambda,
     n_threads = as.integer(threads_val),
+    engine = engine,
+    speedup = (engine == "speedup"),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
     verbose = as.logical(verbose),
     ...
@@ -290,6 +301,7 @@ pval_fourier <- function(x,
                          n_threads = min(2L, parallel::detectCores()),
                          precision = c("double", "double-double"),
                          precompute = TRUE,
+                         engine = c("speedup", "standard"),
                          verbose = FALSE,
                          ...) {
   if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
@@ -303,6 +315,7 @@ pval_fourier <- function(x,
   st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
   threads_val <- resolve_n_threads(n_threads)
   precision <- match.arg(precision)
+  engine <- match.arg(engine)
 
   opts <- list(
     method = "fourier",
@@ -317,6 +330,8 @@ pval_fourier <- function(x,
     n_threads = as.integer(threads_val),
     precision = precision,
     precompute = as.logical(precompute),
+    engine = engine,
+    speedup = (engine == "speedup"),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
     verbose = as.logical(verbose),
     ...

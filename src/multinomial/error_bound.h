@@ -34,7 +34,11 @@
 //      computed. IMPORTANT: the RMS must be taken in the trailing window of n, not over all
 //      n <= N. At small n the coefficients are still in their smooth initial decay, so averaging
 //      from n=1 measures that decay rather than the plateau and makes N_eff grow spuriously with
-//      the number of terms averaged.
+//      the number of terms averaged. It must also be taken of the RATIO |nuhat(n)|/|nuhat(0)|,
+//      not of the raw magnitude: nuhat(n) itself carries whatever astronomically small scale p
+//      does, and squaring that directly (as an RMS needs to) underflows to exact 0 in double
+//      precision long before the ratio would, silently reporting N_eff = infinity and a truncation
+//      estimate of exactly 0 instead of the small-but-nonzero values actually meant.
 //
 //   3. A late revival of |nuhat(n)| towards nuhat(0) signals a lattice/near-lattice support, where
 //      the coefficients stop cancelling and the series stalls. This is the failure mode of the
@@ -45,7 +49,14 @@
 // Everything here is read-only with respect to the series result: it never changes the p-value.
 
 typedef struct {
-    complex_t* restrict nu;   // nuhat(n) = M_S(z_n) for n = 0 .. n_last, complex
+    complex_t* restrict nu;   // nuhat(n)/nuhat(0) for n = 0 .. n_last; nu[0] == 1 when nu0_valid
+    qcomplex_t nu0;           // nuhat(0) = M(gamma), kept at full quad precision. p and nuhat(0)
+                              // are always comparable in scale (both carry the same tilt), but
+                              // that shared scale can itself be far below what double can hold --
+                              // every nuhat(n) underflows to exact 0 once narrowed to double, not
+                              // just their squares -- so nuhat(0) must never be narrowed until
+                              // it's safely inside a ratio against something equally extreme.
+    int_t nu0_valid;
     int_t cap;
     int_t n_last;
 } err_diag_t;
@@ -60,6 +71,8 @@ static inline complex_t series_sinc(const int_t n, const real_t gamma, const rea
 
 static void err_diag_init(err_diag_t* restrict d, const int_t cap) {
     d->nu = malloc((size_t)cap*sizeof(complex_t));
+    d->nu0 = 0;
+    d->nu0_valid = 0;
     d->cap = cap;
     d->n_last = -1;
 }
@@ -70,46 +83,62 @@ static void err_diag_free(err_diag_t* restrict d) {
 }
 
 // Accumulate over res_arr[n_lo .. n_hi-1]. Must be called on the RAW terms, before series()
-// halves res_arr[0].
+// halves res_arr[0]. The very first chunk always includes n=0 (fourier.h's chunking starts every
+// call at frequency 0), so nu0 is available before any n>0 entry is normalized against it.
 static void err_diag_accum(
         err_diag_t* restrict d, const qcomplex_t* restrict res_arr,
         const int_t n_lo, const int_t n_hi, const real_t gamma, const real_t T
 ) {
     for (int_t n=n_lo; n<n_hi && n<d->cap; n++) {
         const complex_t s = series_sinc(n, gamma, T);
-        d->nu[n] = cabs(s) > 0 ? res_arr[n]/s : 0.0;
+        const qcomplex_t nu_n = cabs(s) > 0 ? res_arr[n]/s : 0.0;
+        if (n == 0) {
+            d->nu0 = nu_n;
+            d->nu0_valid = cabsq(nu_n) > 0;
+            d->nu[0] = d->nu0_valid ? 1.0 : 0.0;
+        } else {
+            d->nu[n] = d->nu0_valid ? (complex_t)(nu_n/d->nu0) : 0.0;
+        }
         d->n_last = n;
     }
 }
 
-// RMS of |nuhat(n)| over the trailing window [n_last/2, n_last] -- the frequencies that actually
-// govern the tail, and the only ones representative of the Wiener plateau.
-static double err_rms_tail(const err_diag_t* restrict d) {
-    if (d->n_last < 3) return NAN;
+// RMS of |nuhat(n)|/|nuhat(0)| over the trailing window [n_last/2, n_last] -- the frequencies that
+// actually govern the tail, and the only ones representative of the Wiener plateau. d->nu already
+// holds nuhat(n)/nuhat(0) (normalized in quad precision at accumulation time, see err_diag_accum),
+// so this only ever squares an O(1) ratio, never the raw magnitude -- which is what makes it safe
+// regardless of how astronomically small p (and so nuhat(0) and every nuhat(n)) is: squaring the
+// raw magnitude directly underflows to exact 0 in double precision as soon as |nuhat(n)| drops
+// below about 1e-154 (its square is then below the smallest representable double, ~1e-308),
+// silently turning a merely-small RMS into a false zero, exactly like nuhat(0) itself underflowing
+// to exact 0 would if it were ever narrowed to double before being used in a ratio.
+static double err_rms_tail_ratio(const err_diag_t* restrict d) {
+    if (d->n_last < 3 || !d->nu0_valid) return NAN;
     const int_t lo = d->n_last/2 > 1 ? d->n_last/2 : 1;
     double s = 0;
     int_t c = 0;
-    for (int_t n=lo; n<=d->n_last; n++) { s += cabs(d->nu[n])*cabs(d->nu[n]); c++; }
+    for (int_t n=lo; n<=d->n_last; n++) { const double r = cabs(d->nu[n]); s += r*r; c++; }
     return c > 0 ? sqrt(s/(double)c) : NAN;
 }
 
 // Participation ratio of the tilted measure's atoms, via Wiener's theorem:
-// RMS_n |nuhat(n)| = nuhat(0)/sqrt(N_eff).
+// RMS_n |nuhat(n)| = nuhat(0)/sqrt(N_eff), i.e. N_eff = 1/RMS_n[|nuhat(n)|/nuhat(0)]^2.
 static double err_n_eff(const err_diag_t* restrict d) {
-    if (d->n_last < 3 || !(cabs(d->nu[0]) > 0)) return NAN;
-    const double rms = err_rms_tail(d);
-    if (!(rms > 0)) return INFINITY;
-    return (cabs(d->nu[0])/rms)*(cabs(d->nu[0])/rms);
+    if (d->n_last < 3 || !d->nu0_valid) return NAN;
+    const double rms_ratio = err_rms_tail_ratio(d);
+    if (!(rms_ratio > 0)) return INFINITY;
+    return 1.0/(rms_ratio*rms_ratio);
 }
 
 // Largest |nuhat(n)|/nuhat(0) over the upper three quarters of the computed range: a value near 1
 // here means the coefficients have revived rather than continued to cancel (lattice support).
+// d->nu[n] is already that ratio.
 static double err_max_revival(const err_diag_t* restrict d, int_t* restrict n_at) {
     if (n_at) *n_at = -1;
-    if (d->n_last < 4 || !(cabs(d->nu[0]) > 0)) return NAN;
+    if (d->n_last < 4 || !d->nu0_valid) return NAN;
     double m = 0;
     for (int_t n=d->n_last/4; n<=d->n_last; n++) {
-        const double r = cabs(d->nu[n])/cabs(d->nu[0]);
+        const double r = cabs(d->nu[n]);
         if (r > m) { m = r; if (n_at) *n_at = n; }
     }
     return m;
@@ -132,11 +161,20 @@ static double err_tail_c2(const int_t N, const real_t gamma, const real_t T) {
 // This is a magnitude estimate under a random-phase model for the unseen coefficients, NOT a
 // certified bound -- it is exactly the quantity that a late revival invalidates, which is why
 // err_max_revival is reported alongside it.
-static double err_rel_estimate(const err_diag_t* restrict d, const double p, const real_t gamma, const real_t T) {
-    if (d->n_last < 3 || !(fabs(p) > 0)) return NAN;
-    const double rms = err_rms_tail(d);
-    if (!(rms >= 0)) return NAN;
-    return M_SQRT2*rms*sqrt(err_tail_c2(d->n_last, gamma, T))/fabs(p);
+//
+// RMS|nuhat| itself is reconstructed as rms_ratio*|nuhat(0)|, but rearranged into
+// rms_ratio*(|nuhat(0)|/|p|) so no intermediate ever needs to hold the raw (possibly
+// astronomically small) RMS magnitude -- |nuhat(0)| and |p| are always comparable in scale (both
+// carry the same overall tilt/normalization), so their ratio is a normal-sized double even when
+// each alone is not. p is taken in quad precision (the same precision series() accumulates it in)
+// and the ratio is formed there too, so a p as extreme as nuhat(0) never gets narrowed to double
+// on its own first -- only the caller's final, ordinary-sized quotient is.
+static double err_rel_estimate(const err_diag_t* restrict d, const quad_t p, const real_t gamma, const real_t T) {
+    if (d->n_last < 3 || !(fabsq(p) > 0) || !d->nu0_valid) return NAN;
+    const double rms_ratio = err_rms_tail_ratio(d);
+    if (!(rms_ratio >= 0)) return NAN;
+    const double nu0_over_p = (double)(cabsq(d->nu0)/fabsq(p));
+    return M_SQRT2*rms_ratio*nu0_over_p*sqrt(err_tail_c2(d->n_last, gamma, T));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -164,15 +202,17 @@ static double err_rel_estimate(const err_diag_t* restrict d, const double p, con
 
 static double selberg_phi(const err_diag_t* restrict d, const double c, const real_t T) {
     const int_t N = d->n_last;
-    if (N < 1) return NAN;
+    if (N < 1 || !d->nu0_valid) return NAN;
     const double Np1 = (double)(N + 1);
-    double acc = creal(d->nu[0]);                    // n = 0 term, weight 1
+    double acc = 1.0;                                 // n = 0 term (nuhat(0)/nuhat(0)), weight 1
     for (int_t n=1; n<=N; n++) {
         const double w = 1.0 - (double)n/Np1;
         const complex_t term = cexp(I*(double)n*(double)T*c)*d->nu[n];
         acc += 2.0*w*creal(term);                    // n and -n, using nuhat(-n) = conj(nuhat(n))
     }
-    return acc;
+    // d->nu holds ratios to nuhat(0); rescale back to absolute units (nuhat(0) is real, see the
+    // "nu >= 0" remark at the top of this file, so its real part is the whole thing).
+    return acc*(double)crealq(d->nu0);
 }
 
 // Width of the certified enclosure. quad_pts controls the layer-cake quadrature in t.

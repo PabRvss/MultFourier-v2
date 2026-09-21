@@ -11,15 +11,23 @@
 #include "multinomial/multinomial.h"
 #include "multinomial/fourier.h"
 #include "multinomial/exhaustive_bisection.h"
+#include "multinomial/exhaustive_bounds.h"
 
 extern void init_ext(int_t fact_max, int_t verbose_ext);
+
+static void exhaustive_dispatch(multinomial* mult, multinomial_result* mult_res, options_t* options) {
+    if (options->fast_exhaustive) exhaustive_bounds(mult, mult_res, options);
+    else exhaustive_bisection(mult, mult_res, options);
+}
 
 /* Known option keys whitelist to prevent silent typo failures */
 static const char* KNOWN_KEYS[] = {
     "method", "stat", "lambda", "undersampling", "avg_window", "average_window",
     "avg_flat", "average_flat", "rel_eps", "max_terms", "B", "n_threads", "threads",
     "precision", "precompute", "max_time", "verbose", "print_freq", "enum_cutoff",
-    "eps_gamma", "error_bound"
+    "eps_gamma", "error_bound",
+    "poisson", "gamma_newton", "fast_interval", "fast_exhaustive", "extrapolate",
+    "speedup", "engine"
 };
 static const int N_KNOWN_KEYS = sizeof(KNOWN_KEYS) / sizeof(KNOWN_KEYS[0]);
 
@@ -82,8 +90,8 @@ static const char* get_opt_str(SEXP list, const char* name, const char* def_val)
 }
 
 static SEXP pack_result(const multinomial_result* mult_res) {
-    SEXP res   = PROTECT(Rf_allocVector(VECSXP, 12));
-    SEXP names = PROTECT(Rf_allocVector(STRSXP, 12));
+    SEXP res   = PROTECT(Rf_allocVector(VECSXP, 13));
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 13));
 
     SET_VECTOR_ELT(res, 0, Rf_ScalarReal(mult_res->pval));
     SET_STRING_ELT(names, 0, Rf_mkChar("pval"));
@@ -120,6 +128,9 @@ static SEXP pack_result(const multinomial_result* mult_res) {
 
     SET_VECTOR_ELT(res, 11, Rf_ScalarReal(mult_res->nu_max_ratio));
     SET_STRING_ELT(names, 11, Rf_mkChar("nu_max_ratio"));
+
+    SET_VECTOR_ELT(res, 12, Rf_ScalarReal(mult_res->err_rel_ext));
+    SET_STRING_ELT(names, 12, Rf_mkChar("err_rel_ext"));
 
     Rf_setAttrib(res, R_NamesSymbol, names);
     UNPROTECT(2);
@@ -188,6 +199,18 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
     options.use_fft_precompute = get_opt_bool(r_opts, "precompute", 1);
     options.error_bound = get_opt_bool(r_opts, "error_bound", 1);
 
+    int speedup_opt = get_opt_bool(r_opts, "speedup", 1);
+    const char* engine_str = get_opt_str(r_opts, "engine", speedup_opt ? "speedup" : "standard");
+    if (strcmp(engine_str, "standard") == 0 || strcmp(engine_str, "classic") == 0 || strcmp(engine_str, "main") == 0) {
+        speedup_opt = 0;
+    }
+
+    options.poisson = get_opt_bool(r_opts, "poisson", speedup_opt ? 1 : 0);
+    options.gamma_newton = get_opt_bool(r_opts, "gamma_newton", speedup_opt ? 1 : 0);
+    options.fast_interval = get_opt_bool(r_opts, "fast_interval", speedup_opt ? 1 : 0);
+    options.fast_exhaustive = get_opt_bool(r_opts, "fast_exhaustive", speedup_opt ? 1 : 0);
+    options.extrapolate = get_opt_int(r_opts, "extrapolate", speedup_opt ? 2 : 0);
+
     const char* prec_str = get_opt_str(r_opts, "precision", "double");
     if (strcmp(prec_str, "double-double") == 0 || strcmp(prec_str, "dd") == 0) {
         options.fft_precision = FFT_DD;
@@ -213,6 +236,7 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
     mult_res.gamma = NA_REAL;
     mult_res.W = NA_REAL;
     mult_res.eval_time = NA_REAL;
+    mult_res.err_rel_ext = NA_REAL;
     mult_res.err_rel_est = NA_REAL;
     mult_res.n_eff = NA_REAL;
     mult_res.nu_max_ratio = NA_REAL;
@@ -254,7 +278,7 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
         mult_res.method = 0;
         mult_res.gamma = NA_REAL;
         mult_res.W = NA_REAL;
-        exhaustive_bisection(mult, &mult_res, &options);
+        exhaustive_dispatch(mult, &mult_res, &options);
     }
 
     free_mult(mult);

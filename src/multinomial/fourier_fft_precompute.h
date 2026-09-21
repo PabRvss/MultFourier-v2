@@ -225,7 +225,8 @@ static fourier_fft_plan_t* build_fourier_fft_plan(const multinomial* restrict mu
         C = temp;
     }
 
-    plan->resN_exp = exp_quad(A[N] - l_prev*(real_t)N + lgac[N]);
+    // plan->resN_exp = exp((double)A[N] - (double)(l_prev*(real_t)N) + lgac[N]);
+    plan->resN_exp = expq(A[N] - l_prev*(real_t)N + lgac[N]);
 
     free(l_rate);
     free(A);
@@ -244,7 +245,6 @@ static void* eval_fourier_fft_precompute_thread(void* args_void) {
     arguments_t* args = args_void;
 
     const multinomial* restrict mult = args->mult;
-    const cell_t* restrict global = mult->matrix;
     const fourier_fft_plan_t* restrict plan = args->plan;
     qcomplex_t* restrict res_arr = args->res_arr;
 
@@ -262,7 +262,10 @@ static void* eval_fourier_fft_precompute_thread(void* args_void) {
 
     const real_t s2_re = M_PI*mult->gamma/mult->T;
 
-    for (int_t n=args->start; n<args->end; n++) {
+    const int_t cells = K*(N+1);
+    if (!args->warm) phase_seed(args, args->start, cells);
+
+    for (int_t n=args->start; n<args->end; n+=args->stride_n) {
         for (int_t i=0; i<M; i++) A[i] = U_ZERO;
 
         for (int_t k=K-1; k>=0; k--) {  // reversed
@@ -270,20 +273,10 @@ static void* eval_fourier_fft_precompute_thread(void* args_void) {
             const merge_t* restrict mf = &plan->factors[(int_t)k*calls_per_round];
             int_t idx = 0;
 
+            phase_load(args, index_k, N);
             for (int_t i=0; i<=N; i++) {
-                const int_t index = index_k + i;
-                const real_t rewardT = global[index].reward;
-#ifdef USE_SIMD
-                for (int s=0; s<STRIDE; s++) {
-                    const real_t arg = (n*STRIDE + s)*rewardT;
-                    B[i].unit_re[s] = cos(arg);
-                    B[i].unit_im[s] = -sin(arg);
-                }
-#else
-                const real_t arg = n*rewardT;
-                B[i].unit_re = cos(arg);
-                B[i].unit_im = -sin(arg);
-#endif
+                B[i].unit_re = args->local[i].cos;
+                B[i].unit_im = -args->local[i].sin;
             }
             for (int_t i=N+1; i<M; i++) B[i] = U_ZERO;
 
@@ -382,6 +375,7 @@ static void* eval_fourier_fft_precompute_thread(void* args_void) {
         const complex_t unit = A[N].unit_re + I*A[N].unit_im;
         res_arr[n] = plan->resN_exp*(unit*sinc);
 #endif
+        phase_advance(args, cells);
     }
 
     free(A);
