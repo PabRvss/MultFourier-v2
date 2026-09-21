@@ -2,18 +2,18 @@
 % Please edit documentation in R/pvalues.R
 \name{print.multfourier}
 \alias{print.multfourier}
-\title{Metodo print para objetos de clase multfourier}
+\title{Print method for multfourier objects}
 \usage{
 \method{print}{multfourier}(x, ...)
 }
 \arguments{
-\item{x}{Objeto devuelto por pval_fourier, pval_exhaustive o pval_flexible.}
+\item{x}{Object of class \code{"multfourier"} returned by \code{pval_fourier}, \code{pval_exhaustive}, or \code{pval_flexible}.}
 
-\item{...}{Argumentos adicionales no utilizados.}
+\item{...}{Additional arguments (currently unused).}
 }
 \value{
-Retorna el objeto de forma invisible.
+Invisibly returns the input object.
 }
 \description{
-Metodo print para objetos de clase multfourier
+Print method for multfourier objects
 }

@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<meta name="author" content="Charles Thraves, Pablo Rivas, Felipe Subiabre" />
+
+
+<title>Detecting Unusual Polling-Table Results with MultFourier</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Detecting Unusual Polling-Table Results
+with MultFourier</h1>
+<h4 class="author">Charles Thraves, Pablo Rivas, Felipe Subiabre</h4>
+
+
+
+<div id="motivation" class="section level1">
+<h1>Motivation</h1>
+<p>This vignette illustrates how <code>MultFourier</code> can be used to
+identify unusual outcomes in a collection of multinomial observations.
+The application analyzes results from polling tables belonging to the
+same polling location in the 2024 Chilean municipal election.</p>
+<p>Within a polling location, registered voters are assigned to polling
+tables approximately according to alphabetical order. If voter surname
+is unrelated to political preference, the underlying voting distribution
+should be broadly similar across tables in the same location. This
+structure provides a natural multinomial goodness-of-fit setting: we can
+estimate a reference probability vector from the remaining tables in the
+location, and then test whether the result observed at a given table is
+statistically compatible with that null distribution.</p>
+</div>
+<div id="data-escuela-centenario-iquique" class="section level1">
+<h1>Data: Escuela Centenario, Iquique</h1>
+<p>The example focuses on the <strong>Escuela Centenario</strong>
+polling location in Iquique. This location comprises 15 polling tables,
+numbered 276 through 290. Most tables contain 400 registered voters,
+while the final two tables are smaller.</p>
+<p>The vote matrix below records abstention, votes for four mayoral
+candidates, and null or blank votes. Columns correspond to individual
+polling tables.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(MultFourier)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>votes <span class="ot">&lt;-</span> <span class="fu">matrix</span>(</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>  <span class="fu">c</span>(</span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>    <span class="co"># Abstention</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a>     <span class="dv">96</span>, <span class="dv">101</span>, <span class="dv">173</span>,  <span class="dv">94</span>, <span class="dv">106</span>,  <span class="dv">88</span>,  <span class="dv">96</span>, <span class="dv">104</span>,  <span class="dv">88</span>,  <span class="dv">98</span>, <span class="dv">109</span>,  <span class="dv">92</span>, <span class="dv">104</span>, <span class="dv">57</span>, <span class="dv">50</span>,</span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>    <span class="co"># Candidate A</span></span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a>     <span class="dv">37</span>,  <span class="dv">34</span>,  <span class="dv">31</span>,  <span class="dv">34</span>,  <span class="dv">37</span>,  <span class="dv">37</span>,  <span class="dv">35</span>,  <span class="dv">32</span>,  <span class="dv">40</span>,  <span class="dv">37</span>,  <span class="dv">37</span>,  <span class="dv">38</span>,  <span class="dv">36</span>, <span class="dv">22</span>, <span class="dv">25</span>,</span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>    <span class="co"># Candidate B</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a>     <span class="dv">39</span>,  <span class="dv">37</span>,  <span class="dv">36</span>,  <span class="dv">36</span>,  <span class="dv">26</span>,  <span class="dv">29</span>,  <span class="dv">28</span>,  <span class="dv">39</span>,  <span class="dv">39</span>,  <span class="dv">34</span>,  <span class="dv">28</span>,  <span class="dv">32</span>,  <span class="dv">35</span>, <span class="dv">15</span>, <span class="dv">27</span>,</span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>    <span class="co"># Candidate C</span></span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a>     <span class="dv">99</span>, <span class="dv">107</span>, <span class="dv">110</span>, <span class="dv">108</span>, <span class="dv">127</span>, <span class="dv">107</span>, <span class="dv">108</span>, <span class="dv">125</span>,  <span class="dv">89</span>, <span class="dv">100</span>, <span class="dv">109</span>, <span class="dv">103</span>,  <span class="dv">98</span>, <span class="dv">74</span>, <span class="dv">70</span>,</span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a>    <span class="co"># Null and blank votes</span></span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a>     <span class="dv">46</span>,  <span class="dv">37</span>,  <span class="dv">42</span>,  <span class="dv">41</span>,  <span class="dv">34</span>,  <span class="dv">37</span>,  <span class="dv">45</span>,  <span class="dv">26</span>,  <span class="dv">62</span>,  <span class="dv">45</span>,  <span class="dv">48</span>,  <span class="dv">49</span>,  <span class="dv">41</span>, <span class="dv">21</span>, <span class="dv">21</span>,</span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a>    <span class="co"># Candidate D</span></span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a>     <span class="dv">83</span>,  <span class="dv">84</span>,   <span class="dv">8</span>,  <span class="dv">87</span>,  <span class="dv">70</span>, <span class="dv">102</span>,  <span class="dv">88</span>,  <span class="dv">74</span>,  <span class="dv">82</span>,  <span class="dv">86</span>,  <span class="dv">69</span>,  <span class="dv">86</span>,  <span class="dv">86</span>, <span class="dv">49</span>, <span class="dv">44</span></span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a>  ),</span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a>  <span class="at">nrow =</span> <span class="dv">6</span>,</span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a>  <span class="at">byrow =</span> <span class="cn">TRUE</span></span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a>)</span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="fu">rownames</span>(votes) <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a>  <span class="st">&quot;Abstention&quot;</span>,</span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a>  <span class="st">&quot;Candidate A&quot;</span>,</span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a>  <span class="st">&quot;Candidate B&quot;</span>,</span>
+<span id="cb1-26"><a href="#cb1-26" tabindex="-1"></a>  <span class="st">&quot;Candidate C&quot;</span>,</span>
+<span id="cb1-27"><a href="#cb1-27" tabindex="-1"></a>  <span class="st">&quot;Null/blank&quot;</span>,</span>
+<span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a>  <span class="st">&quot;Candidate D&quot;</span></span>
+<span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a>)</span>
+<span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a></span>
+<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a><span class="fu">colnames</span>(votes) <span class="ot">&lt;-</span> <span class="fu">as.character</span>(<span class="dv">276</span><span class="sc">:</span><span class="dv">290</span>)</span>
+<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a></span>
+<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a>table_sizes <span class="ot">&lt;-</span> <span class="fu">colSums</span>(votes)</span>
+<span id="cb1-34"><a href="#cb1-34" tabindex="-1"></a>table_sizes</span>
+<span id="cb1-35"><a href="#cb1-35" tabindex="-1"></a><span class="co">#&gt; 276 277 278 279 280 281 282 283 284 285 286 287 288 289 290 </span></span>
+<span id="cb1-36"><a href="#cb1-36" tabindex="-1"></a><span class="co">#&gt; 400 400 400 400 400 400 400 400 400 400 400 400 400 238 237</span></span></code></pre></div>
+<p>The first 13 tables have exactly 400 registered voters each (<span class="math inline">\(N_m = 400\)</span>), while tables 289 and 290 have
+238 and 237 voters, respectively.</p>
+</div>
+<div id="visual-inspection" class="section level1">
+<h1>Visual Inspection</h1>
+<p>Because table sizes differ slightly, proportions provide a fairer
+visual comparison than raw counts.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>prop <span class="ot">&lt;-</span> <span class="fu">sweep</span>(votes, <span class="dv">2</span>, table_sizes, <span class="st">&quot;/&quot;</span>)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a></span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>heat_data <span class="ot">&lt;-</span> <span class="fu">as.data.frame</span>(<span class="fu">as.table</span>(prop))</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a><span class="fu">names</span>(heat_data) <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;Option&quot;</span>, <span class="st">&quot;Table&quot;</span>, <span class="st">&quot;Proportion&quot;</span>)</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a></span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">requireNamespace</span>(<span class="st">&quot;ggplot2&quot;</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)) {</span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>  ggplot2<span class="sc">::</span><span class="fu">ggplot</span>(</span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>    heat_data,</span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">aes</span>(<span class="at">x =</span> Table, <span class="at">y =</span> Option, <span class="at">fill =</span> Proportion)</span>
+<span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">geom_tile</span>(<span class="at">color =</span> <span class="st">&quot;white&quot;</span>, <span class="at">linewidth =</span> <span class="fl">0.25</span>) <span class="sc">+</span></span>
+<span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">scale_fill_gradient</span>(<span class="at">low =</span> <span class="st">&quot;white&quot;</span>, <span class="at">high =</span> <span class="st">&quot;black&quot;</span>) <span class="sc">+</span></span>
+<span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">labs</span>(</span>
+<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">&quot;Polling table&quot;</span>,</span>
+<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a>      <span class="at">y =</span> <span class="cn">NULL</span>,</span>
+<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a>      <span class="at">fill =</span> <span class="st">&quot;Proportion&quot;</span></span>
+<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">11</span>) <span class="sc">+</span></span>
+<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">theme</span>(</span>
+<span id="cb2-20"><a href="#cb2-20" tabindex="-1"></a>      <span class="at">panel.grid =</span> ggplot2<span class="sc">::</span><span class="fu">element_blank</span>(),</span>
+<span id="cb2-21"><a href="#cb2-21" tabindex="-1"></a>      <span class="at">axis.text.x =</span> ggplot2<span class="sc">::</span><span class="fu">element_text</span>(<span class="at">angle =</span> <span class="dv">45</span>, <span class="at">hjust =</span> <span class="dv">1</span>)</span>
+<span id="cb2-22"><a href="#cb2-22" tabindex="-1"></a>    )</span>
+<span id="cb2-23"><a href="#cb2-23" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb2-24"><a href="#cb2-24" tabindex="-1"></a>  <span class="fu">heatmap</span>(</span>
+<span id="cb2-25"><a href="#cb2-25" tabindex="-1"></a>    prop,</span>
+<span id="cb2-26"><a href="#cb2-26" tabindex="-1"></a>    <span class="at">Rowv =</span> <span class="cn">NA</span>,</span>
+<span id="cb2-27"><a href="#cb2-27" tabindex="-1"></a>    <span class="at">Colv =</span> <span class="cn">NA</span>,</span>
+<span id="cb2-28"><a href="#cb2-28" tabindex="-1"></a>    <span class="at">scale =</span> <span class="st">&quot;none&quot;</span>,</span>
+<span id="cb2-29"><a href="#cb2-29" tabindex="-1"></a>    <span class="at">margins =</span> <span class="fu">c</span>(<span class="dv">5</span>, <span class="dv">10</span>),</span>
+<span id="cb2-30"><a href="#cb2-30" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">&quot;Polling table&quot;</span>,</span>
+<span id="cb2-31"><a href="#cb2-31" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">&quot;&quot;</span></span>
+<span id="cb2-32"><a href="#cb2-32" tabindex="-1"></a>  )</span>
+<span id="cb2-33"><a href="#cb2-33" tabindex="-1"></a>}</span></code></pre></div>
+<div class="float">
+<img role="img" aria-label="Vote proportions by polling table at Escuela Centenario." src="data:image/png;base64,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" alt="Vote proportions by polling table at Escuela Centenario." />
+<div class="figcaption">Vote proportions by polling table at Escuela
+Centenario.</div>
+</div>
+<p>Inspection of the heatmap highlights <strong>Table 278</strong>:
+Candidate D received only 8 votes (2%), compared with 70–100 votes
+(17%–25%) in neighboring tables, while abstention was markedly higher
+(173 votes).</p>
+<p>While visually salient, graphical inspection alone does not quantify
+how statistically improbable this outcome is under the multinomial
+model.</p>
+</div>
+<div id="leave-one-out-reference-distribution" class="section level1">
+<h1>Leave-One-Out Reference Distribution</h1>
+<p>Let <span class="math inline">\(X_m = (X_{m1}, \ldots,
+X_{mK})\)</span> denote the vector of observed counts at table <span class="math inline">\(m\)</span>, with total sample size <span class="math inline">\(N_m = \sum_{k=1}^K X_{mk}\)</span>.</p>
+<p>To evaluate whether table <span class="math inline">\(m\)</span> is
+compatible with the location as a whole without allowing an anomalous
+table to contaminate its own reference distribution, we estimate the
+null probability vector using a <strong>leave-one-out</strong>
+scheme:</p>
+<p><span class="math display">\[
+\widehat p_k^{(-m)}
+=
+\frac{\sum_{j \neq m} X_{jk}}{\sum_{j \neq m} N_j},
+\qquad k = 1, \ldots, K.
+\]</span></p>
+<p>Under this formulation, table <span class="math inline">\(m\)</span>
+contributes zero weight to its own reference vector <span class="math inline">\(\widehat{\mathbf{p}}^{(-m)}\)</span>.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>loo_p <span class="ot">&lt;-</span> <span class="fu">sapply</span>(</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>  <span class="fu">seq_len</span>(<span class="fu">ncol</span>(votes)),</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>  <span class="cf">function</span>(m) {</span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>    other_counts <span class="ot">&lt;-</span> <span class="fu">rowSums</span>(votes[, <span class="sc">-</span>m, <span class="at">drop =</span> <span class="cn">FALSE</span>])</span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>    other_counts <span class="sc">/</span> <span class="fu">sum</span>(other_counts)</span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>  }</span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>)</span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a></span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a><span class="fu">rownames</span>(loo_p) <span class="ot">&lt;-</span> <span class="fu">rownames</span>(votes)</span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a><span class="fu">colnames</span>(loo_p) <span class="ot">&lt;-</span> <span class="fu">colnames</span>(votes)</span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a></span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a><span class="co"># Reference distribution for table 278</span></span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a><span class="fu">round</span>(loo_p[, <span class="st">&quot;278&quot;</span>], <span class="dv">4</span>)</span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a><span class="co">#&gt;  Abstention Candidate A Candidate B Candidate C  Null/blank Candidate D </span></span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a><span class="co">#&gt;      0.2432      0.0912      0.0842      0.2700      0.1048      0.2066</span></span></code></pre></div>
+</div>
+<div id="detailed-analysis-of-table-278" class="section level1">
+<h1>Detailed Analysis of Table 278</h1>
+<p>For table 278, the null hypothesis posits:</p>
+<p><span class="math display">\[
+X_{278} \sim \mathrm{Multinomial}\left(N_{278} = 400, \;
+\widehat{\mathbf{p}}^{(-278)}\right).
+\]</span></p>
+<p>We first compare observed counts with expected counts under <span class="math inline">\(\widehat{\mathbf{p}}^{(-278)}\)</span>:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>comparison_278 <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>  <span class="at">Option =</span> <span class="fu">rownames</span>(votes),</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>  <span class="at">Observed =</span> votes[, <span class="st">&quot;278&quot;</span>],</span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a>  <span class="at">Expected =</span> <span class="fu">round</span>(table_sizes[<span class="st">&quot;278&quot;</span>] <span class="sc">*</span> loo_p[, <span class="st">&quot;278&quot;</span>], <span class="dv">1</span>),</span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a>  <span class="at">Difference =</span> <span class="fu">round</span>(votes[, <span class="st">&quot;278&quot;</span>] <span class="sc">-</span> table_sizes[<span class="st">&quot;278&quot;</span>] <span class="sc">*</span> loo_p[, <span class="st">&quot;278&quot;</span>], <span class="dv">1</span>),</span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a>  <span class="at">row.names =</span> <span class="cn">NULL</span></span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a>)</span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a></span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a>  comparison_278,</span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">&quot;Observed vs. expected counts for Polling Table 278.&quot;</span></span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a>)</span></code></pre></div>
+<table>
+<caption>Observed vs. expected counts for Polling Table 278.</caption>
+<thead>
+<tr class="header">
+<th align="left">Option</th>
+<th align="right">Observed</th>
+<th align="right">Expected</th>
+<th align="right">Difference</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Abstention</td>
+<td align="right">173</td>
+<td align="right">97.3</td>
+<td align="right">75.7</td>
+</tr>
+<tr class="even">
+<td align="left">Candidate A</td>
+<td align="right">31</td>
+<td align="right">36.5</td>
+<td align="right">-5.5</td>
+</tr>
+<tr class="odd">
+<td align="left">Candidate B</td>
+<td align="right">36</td>
+<td align="right">33.7</td>
+<td align="right">2.3</td>
+</tr>
+<tr class="even">
+<td align="left">Candidate C</td>
+<td align="right">110</td>
+<td align="right">108.0</td>
+<td align="right">2.0</td>
+</tr>
+<tr class="odd">
+<td align="left">Null/blank</td>
+<td align="right">42</td>
+<td align="right">41.9</td>
+<td align="right">0.1</td>
+</tr>
+<tr class="even">
+<td align="left">Candidate D</td>
+<td align="right">8</td>
+<td align="right">82.7</td>
+<td align="right">-74.7</td>
+</tr>
+</tbody>
+</table>
+<p>Now we compute the exact multinomial <span class="math inline">\(p\)</span>-value using
+<code>pval_fourier()</code>. By default, <code>MultFourier</code>
+employs the Log-Likelihood Ratio (<code>&quot;llr&quot;</code>) test
+statistic:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>fit_278 <span class="ot">&lt;-</span> <span class="fu">pval_fourier</span>(</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  <span class="at">x =</span> votes[, <span class="st">&quot;278&quot;</span>],</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>  <span class="at">p =</span> loo_p[, <span class="st">&quot;278&quot;</span>]</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a>)</span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a></span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>fit_278</span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a><span class="co">#&gt; Multinomial Test (MultFourier)</span></span>
+<span id="cb5-8"><a href="#cb5-8" tabindex="-1"></a><span class="co">#&gt; ------------------------------</span></span>
+<span id="cb5-9"><a href="#cb5-9" tabindex="-1"></a><span class="co">#&gt; Method     : fourier</span></span>
+<span id="cb5-10"><a href="#cb5-10" tabindex="-1"></a><span class="co">#&gt; Statistic  : Log-Likelihood Ratio</span></span>
+<span id="cb5-11"><a href="#cb5-11" tabindex="-1"></a><span class="co">#&gt; p-value    : 9.2007387e-33</span></span>
+<span id="cb5-12"><a href="#cb5-12" tabindex="-1"></a><span class="co">#&gt; Status     : 0 (Converged)</span></span>
+<span id="cb5-13"><a href="#cb5-13" tabindex="-1"></a><span class="co">#&gt; Gamma      : 0.970667</span></span>
+<span id="cb5-14"><a href="#cb5-14" tabindex="-1"></a><span class="co">#&gt; Time gamma : 0.1484 seconds</span></span>
+<span id="cb5-15"><a href="#cb5-15" tabindex="-1"></a><span class="co">#&gt; W          : 909.592</span></span>
+<span id="cb5-16"><a href="#cb5-16" tabindex="-1"></a><span class="co">#&gt; Terms      : 247</span></span>
+<span id="cb5-17"><a href="#cb5-17" tabindex="-1"></a><span class="co">#&gt; Time       : 0.390300 seconds</span></span></code></pre></div>
+<p>The returned <code>multfourier</code> object provides direct access
+to all summary fields: * <code>fit_278$pval</code>: computed <span class="math inline">\(p\)</span>-value (<span class="math inline">\(\approx 9.20 \times 10^{-33}\)</span>). *
+<code>fit_278$stat</code>: test statistic used
+(<code>&quot;Log-Likelihood Ratio&quot;</code>). * <code>fit_278$n_terms</code>:
+number of Fourier expansion terms evaluated (converged in 247 terms). *
+<code>fit_278$time</code>: total execution time in seconds (<span class="math inline">\(\approx 0.35\)</span> s). *
+<code>fit_278$status</code>: completion status ID (<code>0</code>
+indicates full convergence).</p>
+<p>The resulting <span class="math inline">\(p\)</span>-value on the
+order of <span class="math inline">\(10^{-33}\)</span> rigorously
+confirms that the observed pattern at table 278 is extraordinarily
+unlikely under the null model.</p>
+</div>
+<div id="screening-all-polling-tables" class="section level1">
+<h1>Screening All Polling Tables</h1>
+<p>We now iterate over all 15 tables in Escuela Centenario. Each table
+is evaluated against its own leave-one-out reference distribution:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>p_llr <span class="ot">&lt;-</span> <span class="fu">sapply</span>(</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  <span class="fu">colnames</span>(votes),</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="cf">function</span>(m) {</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>    fit <span class="ot">&lt;-</span> <span class="fu">pval_fourier</span>(<span class="at">x =</span> votes[, m], <span class="at">p =</span> loo_p[, m])</span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a>    fit<span class="sc">$</span>pval</span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a>  }</span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a>)</span>
+<span id="cb6-8"><a href="#cb6-8" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>results_llr <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb6-10"><a href="#cb6-10" tabindex="-1"></a>  <span class="at">Table =</span> <span class="fu">colnames</span>(votes),</span>
+<span id="cb6-11"><a href="#cb6-11" tabindex="-1"></a>  <span class="at">Voters =</span> table_sizes,</span>
+<span id="cb6-12"><a href="#cb6-12" tabindex="-1"></a>  <span class="at">p_value =</span> <span class="fu">format</span>(p_llr, <span class="at">scientific =</span> <span class="cn">TRUE</span>, <span class="at">digits =</span> <span class="dv">4</span>),</span>
+<span id="cb6-13"><a href="#cb6-13" tabindex="-1"></a>  <span class="at">row.names =</span> <span class="cn">NULL</span></span>
+<span id="cb6-14"><a href="#cb6-14" tabindex="-1"></a>)</span>
+<span id="cb6-15"><a href="#cb6-15" tabindex="-1"></a></span>
+<span id="cb6-16"><a href="#cb6-16" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb6-17"><a href="#cb6-17" tabindex="-1"></a>  results_llr,</span>
+<span id="cb6-18"><a href="#cb6-18" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">&quot;Leave-one-out multinomial p-values across all tables (LLR statistic).&quot;</span></span>
+<span id="cb6-19"><a href="#cb6-19" tabindex="-1"></a>)</span></code></pre></div>
+<table>
+<caption>Leave-one-out multinomial p-values across all tables (LLR
+statistic).</caption>
+<thead>
+<tr class="header">
+<th align="left">Table</th>
+<th align="right">Voters</th>
+<th align="left">p_value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">276</td>
+<td align="right">400</td>
+<td align="left">6.705e-01</td>
+</tr>
+<tr class="even">
+<td align="left">277</td>
+<td align="right">400</td>
+<td align="left">8.672e-01</td>
+</tr>
+<tr class="odd">
+<td align="left">278</td>
+<td align="right">400</td>
+<td align="left">9.201e-33</td>
+</tr>
+<tr class="even">
+<td align="left">279</td>
+<td align="right">400</td>
+<td align="left">7.759e-01</td>
+</tr>
+<tr class="odd">
+<td align="left">280</td>
+<td align="right">400</td>
+<td align="left">1.208e-01</td>
+</tr>
+<tr class="even">
+<td align="left">281</td>
+<td align="right">400</td>
+<td align="left">2.988e-02</td>
+</tr>
+<tr class="odd">
+<td align="left">282</td>
+<td align="right">400</td>
+<td align="left">6.082e-01</td>
+</tr>
+<tr class="even">
+<td align="left">283</td>
+<td align="right">400</td>
+<td align="left">2.913e-02</td>
+</tr>
+<tr class="odd">
+<td align="left">284</td>
+<td align="right">400</td>
+<td align="left">2.777e-03</td>
+</tr>
+<tr class="even">
+<td align="left">285</td>
+<td align="right">400</td>
+<td align="left">8.043e-01</td>
+</tr>
+<tr class="odd">
+<td align="left">286</td>
+<td align="right">400</td>
+<td align="left">5.893e-01</td>
+</tr>
+<tr class="even">
+<td align="left">287</td>
+<td align="right">400</td>
+<td align="left">5.260e-01</td>
+</tr>
+<tr class="odd">
+<td align="left">288</td>
+<td align="right">400</td>
+<td align="left">8.082e-01</td>
+</tr>
+<tr class="even">
+<td align="left">289</td>
+<td align="right">238</td>
+<td align="left">5.163e-01</td>
+</tr>
+<tr class="odd">
+<td align="left">290</td>
+<td align="right">237</td>
+<td align="left">2.556e-01</td>
+</tr>
+</tbody>
+</table>
+<p>We can visualize the results on a <span class="math inline">\(-\log_{10}(p)\)</span> scale, where higher values
+indicate greater discrepancy with the reference distribution:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="co"># Floor at 1e-35 to maintain a clean graphical scale for extreme tails</span></span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>neg_log10_p <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fu">log10</span>(<span class="fu">pmax</span>(p_llr, <span class="fl">1e-35</span>))</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="fu">plot</span>(</span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a>  <span class="fu">as.integer</span>(<span class="fu">names</span>(p_llr)),</span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a>  neg_log10_p,</span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a>  <span class="at">type =</span> <span class="st">&quot;b&quot;</span>,</span>
+<span id="cb7-8"><a href="#cb7-8" tabindex="-1"></a>  <span class="at">pch =</span> <span class="dv">19</span>,</span>
+<span id="cb7-9"><a href="#cb7-9" tabindex="-1"></a>  <span class="at">col =</span> <span class="st">&quot;black&quot;</span>,</span>
+<span id="cb7-10"><a href="#cb7-10" tabindex="-1"></a>  <span class="at">xlab =</span> <span class="st">&quot;Polling table&quot;</span>,</span>
+<span id="cb7-11"><a href="#cb7-11" tabindex="-1"></a>  <span class="at">ylab =</span> <span class="fu">expression</span>(<span class="sc">-</span>log[<span class="dv">10</span>](p)),</span>
+<span id="cb7-12"><a href="#cb7-12" tabindex="-1"></a>  <span class="at">xaxt =</span> <span class="st">&quot;n&quot;</span>,</span>
+<span id="cb7-13"><a href="#cb7-13" tabindex="-1"></a>  <span class="at">main =</span> <span class="st">&quot;Escuela Centenario: Anomaly Profile&quot;</span></span>
+<span id="cb7-14"><a href="#cb7-14" tabindex="-1"></a>)</span>
+<span id="cb7-15"><a href="#cb7-15" tabindex="-1"></a><span class="fu">axis</span>(<span class="dv">1</span>, <span class="at">at =</span> <span class="fu">as.integer</span>(<span class="fu">names</span>(p_llr)), <span class="at">labels =</span> <span class="fu">names</span>(p_llr))</span>
+<span id="cb7-16"><a href="#cb7-16" tabindex="-1"></a><span class="fu">abline</span>(<span class="at">h =</span> <span class="sc">-</span><span class="fu">log10</span>(<span class="fl">0.05</span> <span class="sc">/</span> <span class="dv">15</span>), <span class="at">lty =</span> <span class="dv">2</span>, <span class="at">col =</span> <span class="st">&quot;red&quot;</span>) <span class="co"># Bonferroni threshold</span></span>
+<span id="cb7-17"><a href="#cb7-17" tabindex="-1"></a><span class="fu">text</span>(<span class="dv">285</span>, <span class="sc">-</span><span class="fu">log10</span>(<span class="fl">0.05</span> <span class="sc">/</span> <span class="dv">15</span>) <span class="sc">+</span> <span class="fl">1.5</span>, <span class="st">&quot;Bonferroni threshold (alpha = 0.05)&quot;</span>, <span class="at">col =</span> <span class="st">&quot;red&quot;</span>, <span class="at">cex =</span> <span class="fl">0.85</span>)</span></code></pre></div>
+<div class="float">
+<img role="img" aria-label="Leave-one-out -log10(p) across polling tables (LLR)." src="data:image/png;base64,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" alt="Leave-one-out -log10(p) across polling tables (LLR)." />
+<div class="figcaption">Leave-one-out -log10(p) across polling tables
+(LLR).</div>
+</div>
+<p>Table 278 exhibits an astronomical signal (<span class="math inline">\(-\log_{10}(p) \approx 32\)</span>), whereas all
+other tables remain within typical sampling variability.</p>
+</div>
+<div id="comparing-multinomial-test-statistics" class="section level1">
+<h1>Comparing Multinomial Test Statistics</h1>
+<p><code>MultFourier</code> supports several classic statistics to
+partition and order the multinomial sample space:</p>
+<ol style="list-style-type: decimal">
+<li><strong>Probability Mass Function (<code>&quot;pmf&quot;</code>)</strong>: The
+exact multinomial point mass <span class="math inline">\(\mathbb{P}(X =
+x)\)</span>. Outcomes with probability less than or equal to the
+observed outcome form the rejection region.</li>
+<li><strong>Pearson’s Chi-Square (<code>&quot;chi2&quot;</code>)</strong>:
+Standard <span class="math inline">\(\sum (O_k - E_k)^2 / E_k\)</span>
+discrepancy.</li>
+<li><strong>Log-Likelihood Ratio (<code>&quot;llr&quot;</code>)</strong>: <span class="math inline">\(G^2 = 2 \sum O_k \ln(O_k / E_k)\)</span>, standard
+for likelihood ratio tests.</li>
+<li><strong>Power-Divergence Family (<code>&quot;pd&quot;</code>)</strong>:
+Cressie &amp; Read (1984) family parameterized by <span class="math inline">\(\lambda \in \mathbb{R}\)</span>. We use <span class="math inline">\(\lambda = 2/3\)</span>, a recommended choice
+balancing Pearson (<span class="math inline">\(\lambda = 1\)</span>) and
+LLR (<span class="math inline">\(\lambda \to 0\)</span>).</li>
+</ol>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>test_specs <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>  <span class="st">&quot;PMF&quot;</span>                   <span class="ot">=</span> <span class="fu">list</span>(<span class="at">stat =</span> <span class="st">&quot;pmf&quot;</span>),</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>  <span class="st">&quot;Pearson (Chi2)&quot;</span>        <span class="ot">=</span> <span class="fu">list</span>(<span class="at">stat =</span> <span class="st">&quot;chi2&quot;</span>),</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>  <span class="st">&quot;Log-Likelihood Ratio&quot;</span>  <span class="ot">=</span> <span class="fu">list</span>(<span class="at">stat =</span> <span class="st">&quot;llr&quot;</span>),</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>  <span class="st">&quot;Power Divergence (2/3)&quot;</span><span class="ot">=</span> <span class="fu">list</span>(<span class="at">stat =</span> <span class="st">&quot;pd&quot;</span>, <span class="at">lambda =</span> <span class="dv">2</span><span class="sc">/</span><span class="dv">3</span>)</span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a>)</span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a></span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a>p_by_test <span class="ot">&lt;-</span> <span class="fu">sapply</span>(</span>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a>  test_specs,</span>
+<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a>  <span class="cf">function</span>(spec) {</span>
+<span id="cb8-11"><a href="#cb8-11" tabindex="-1"></a>    <span class="fu">sapply</span>(</span>
+<span id="cb8-12"><a href="#cb8-12" tabindex="-1"></a>      <span class="fu">colnames</span>(votes),</span>
+<span id="cb8-13"><a href="#cb8-13" tabindex="-1"></a>      <span class="cf">function</span>(m) {</span>
+<span id="cb8-14"><a href="#cb8-14" tabindex="-1"></a>        args <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="at">x =</span> votes[, m], <span class="at">p =</span> loo_p[, m], <span class="at">stat =</span> spec<span class="sc">$</span>stat)</span>
+<span id="cb8-15"><a href="#cb8-15" tabindex="-1"></a>        <span class="cf">if</span> (<span class="sc">!</span><span class="fu">is.null</span>(spec<span class="sc">$</span>lambda)) args<span class="sc">$</span>lambda <span class="ot">&lt;-</span> spec<span class="sc">$</span>lambda</span>
+<span id="cb8-16"><a href="#cb8-16" tabindex="-1"></a>        fit <span class="ot">&lt;-</span> <span class="fu">do.call</span>(pval_fourier, args)</span>
+<span id="cb8-17"><a href="#cb8-17" tabindex="-1"></a>        fit<span class="sc">$</span>pval</span>
+<span id="cb8-18"><a href="#cb8-18" tabindex="-1"></a>      }</span>
+<span id="cb8-19"><a href="#cb8-19" tabindex="-1"></a>    )</span>
+<span id="cb8-20"><a href="#cb8-20" tabindex="-1"></a>  }</span>
+<span id="cb8-21"><a href="#cb8-21" tabindex="-1"></a>)</span>
+<span id="cb8-22"><a href="#cb8-22" tabindex="-1"></a></span>
+<span id="cb8-23"><a href="#cb8-23" tabindex="-1"></a>comparison <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb8-24"><a href="#cb8-24" tabindex="-1"></a>  <span class="at">Table =</span> <span class="fu">colnames</span>(votes),</span>
+<span id="cb8-25"><a href="#cb8-25" tabindex="-1"></a>  <span class="fu">round</span>(p_by_test, <span class="dv">4</span>),</span>
+<span id="cb8-26"><a href="#cb8-26" tabindex="-1"></a>  <span class="at">check.names =</span> <span class="cn">FALSE</span>,</span>
+<span id="cb8-27"><a href="#cb8-27" tabindex="-1"></a>  <span class="at">row.names =</span> <span class="cn">NULL</span></span>
+<span id="cb8-28"><a href="#cb8-28" tabindex="-1"></a>)</span>
+<span id="cb8-29"><a href="#cb8-29" tabindex="-1"></a></span>
+<span id="cb8-30"><a href="#cb8-30" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb8-31"><a href="#cb8-31" tabindex="-1"></a>  comparison,</span>
+<span id="cb8-32"><a href="#cb8-32" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">&quot;Leave-one-out p-values across different test statistics.&quot;</span></span>
+<span id="cb8-33"><a href="#cb8-33" tabindex="-1"></a>)</span></code></pre></div>
+<table>
+<caption>Leave-one-out p-values across different test
+statistics.</caption>
+<colgroup>
+<col width="8%" />
+<col width="9%" />
+<col width="20%" />
+<col width="29%" />
+<col width="31%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">Table</th>
+<th align="right">PMF</th>
+<th align="right">Pearson (Chi2)</th>
+<th align="right">Log-Likelihood Ratio</th>
+<th align="right">Power Divergence (2/3)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">276</td>
+<td align="right">0.6370</td>
+<td align="right">0.6603</td>
+<td align="right">0.6705</td>
+<td align="right">0.6653</td>
+</tr>
+<tr class="even">
+<td align="left">277</td>
+<td align="right">0.8697</td>
+<td align="right">0.8607</td>
+<td align="right">0.8672</td>
+<td align="right">0.8643</td>
+</tr>
+<tr class="odd">
+<td align="left">278</td>
+<td align="right">0.0000</td>
+<td align="right">0.0000</td>
+<td align="right">0.0000</td>
+<td align="right">0.0000</td>
+</tr>
+<tr class="even">
+<td align="left">279</td>
+<td align="right">0.7704</td>
+<td align="right">0.7664</td>
+<td align="right">0.7759</td>
+<td align="right">0.7705</td>
+</tr>
+<tr class="odd">
+<td align="left">280</td>
+<td align="right">0.1343</td>
+<td align="right">0.1251</td>
+<td align="right">0.1208</td>
+<td align="right">0.1224</td>
+</tr>
+<tr class="even">
+<td align="left">281</td>
+<td align="right">0.0303</td>
+<td align="right">0.0218</td>
+<td align="right">0.0299</td>
+<td align="right">0.0233</td>
+</tr>
+<tr class="odd">
+<td align="left">282</td>
+<td align="right">0.6164</td>
+<td align="right">0.6071</td>
+<td align="right">0.6082</td>
+<td align="right">0.6071</td>
+</tr>
+<tr class="even">
+<td align="left">283</td>
+<td align="right">0.0321</td>
+<td align="right">0.0414</td>
+<td align="right">0.0291</td>
+<td align="right">0.0371</td>
+</tr>
+<tr class="odd">
+<td align="left">284</td>
+<td align="right">0.0022</td>
+<td align="right">0.0016</td>
+<td align="right">0.0028</td>
+<td align="right">0.0018</td>
+</tr>
+<tr class="even">
+<td align="left">285</td>
+<td align="right">0.7878</td>
+<td align="right">0.7955</td>
+<td align="right">0.8043</td>
+<td align="right">0.7995</td>
+</tr>
+<tr class="odd">
+<td align="left">286</td>
+<td align="right">0.5951</td>
+<td align="right">0.5919</td>
+<td align="right">0.5893</td>
+<td align="right">0.5936</td>
+</tr>
+<tr class="even">
+<td align="left">287</td>
+<td align="right">0.5053</td>
+<td align="right">0.5146</td>
+<td align="right">0.5260</td>
+<td align="right">0.5184</td>
+</tr>
+<tr class="odd">
+<td align="left">288</td>
+<td align="right">0.7999</td>
+<td align="right">0.8023</td>
+<td align="right">0.8082</td>
+<td align="right">0.8053</td>
+</tr>
+<tr class="even">
+<td align="left">289</td>
+<td align="right">0.5506</td>
+<td align="right">0.5284</td>
+<td align="right">0.5163</td>
+<td align="right">0.5242</td>
+</tr>
+<tr class="odd">
+<td align="left">290</td>
+<td align="right">0.2347</td>
+<td align="right">0.2381</td>
+<td align="right">0.2556</td>
+<td align="right">0.2442</td>
+</tr>
+</tbody>
+</table>
+<p>Notice that for typical tables (e.g. 276, 277, 282, 285), all
+statistics yield comparable <span class="math inline">\(p\)</span>-values. For table 278, every statistic
+produces a <span class="math inline">\(p\)</span>-value essentially
+equal to zero (<span class="math inline">\(\le 10^{-13}\)</span>),
+showing that the detection of the anomaly is completely robust to the
+choice of statistic.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>plot_data <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>  <span class="at">Table   =</span> <span class="fu">rep</span>(<span class="fu">as.integer</span>(<span class="fu">colnames</span>(votes)), <span class="at">times =</span> <span class="fu">ncol</span>(p_by_test)),</span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>  <span class="at">Test    =</span> <span class="fu">rep</span>(<span class="fu">colnames</span>(p_by_test), <span class="at">each =</span> <span class="fu">nrow</span>(p_by_test)),</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>  <span class="at">p_value =</span> <span class="fu">as.vector</span>(p_by_test)</span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a>)</span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a></span>
+<span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a><span class="co"># Display transform floored at 1e-35 for visual clarity</span></span>
+<span id="cb9-8"><a href="#cb9-8" tabindex="-1"></a>plot_data<span class="sc">$</span>neg_log10_p <span class="ot">&lt;-</span> <span class="sc">-</span><span class="fu">log10</span>(<span class="fu">pmax</span>(plot_data<span class="sc">$</span>p_value, <span class="fl">1e-35</span>))</span>
+<span id="cb9-9"><a href="#cb9-9" tabindex="-1"></a></span>
+<span id="cb9-10"><a href="#cb9-10" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">requireNamespace</span>(<span class="st">&quot;ggplot2&quot;</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)) {</span>
+<span id="cb9-11"><a href="#cb9-11" tabindex="-1"></a>  ggplot2<span class="sc">::</span><span class="fu">ggplot</span>(</span>
+<span id="cb9-12"><a href="#cb9-12" tabindex="-1"></a>    plot_data,</span>
+<span id="cb9-13"><a href="#cb9-13" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">aes</span>(</span>
+<span id="cb9-14"><a href="#cb9-14" tabindex="-1"></a>      <span class="at">x =</span> Table,</span>
+<span id="cb9-15"><a href="#cb9-15" tabindex="-1"></a>      <span class="at">y =</span> neg_log10_p,</span>
+<span id="cb9-16"><a href="#cb9-16" tabindex="-1"></a>      <span class="at">color =</span> Test,</span>
+<span id="cb9-17"><a href="#cb9-17" tabindex="-1"></a>      <span class="at">shape =</span> Test,</span>
+<span id="cb9-18"><a href="#cb9-18" tabindex="-1"></a>      <span class="at">linetype =</span> Test</span>
+<span id="cb9-19"><a href="#cb9-19" tabindex="-1"></a>    )</span>
+<span id="cb9-20"><a href="#cb9-20" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb9-21"><a href="#cb9-21" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
+<span id="cb9-22"><a href="#cb9-22" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">geom_point</span>(<span class="at">size =</span> <span class="fl">2.2</span>) <span class="sc">+</span></span>
+<span id="cb9-23"><a href="#cb9-23" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">scale_x_continuous</span>(<span class="at">breaks =</span> <span class="dv">276</span><span class="sc">:</span><span class="dv">290</span>) <span class="sc">+</span></span>
+<span id="cb9-24"><a href="#cb9-24" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">labs</span>(</span>
+<span id="cb9-25"><a href="#cb9-25" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">&quot;Polling table&quot;</span>,</span>
+<span id="cb9-26"><a href="#cb9-26" tabindex="-1"></a>      <span class="at">y =</span> <span class="fu">expression</span>(<span class="sc">-</span>log[<span class="dv">10</span>](p)),</span>
+<span id="cb9-27"><a href="#cb9-27" tabindex="-1"></a>      <span class="at">color =</span> <span class="st">&quot;Test Statistic&quot;</span>,</span>
+<span id="cb9-28"><a href="#cb9-28" tabindex="-1"></a>      <span class="at">shape =</span> <span class="st">&quot;Test Statistic&quot;</span>,</span>
+<span id="cb9-29"><a href="#cb9-29" tabindex="-1"></a>      <span class="at">linetype =</span> <span class="st">&quot;Test Statistic&quot;</span></span>
+<span id="cb9-30"><a href="#cb9-30" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb9-31"><a href="#cb9-31" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">11</span>) <span class="sc">+</span></span>
+<span id="cb9-32"><a href="#cb9-32" tabindex="-1"></a>    ggplot2<span class="sc">::</span><span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">&quot;bottom&quot;</span>)</span>
+<span id="cb9-33"><a href="#cb9-33" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb9-34"><a href="#cb9-34" tabindex="-1"></a>  <span class="fu">matplot</span>(</span>
+<span id="cb9-35"><a href="#cb9-35" tabindex="-1"></a>    <span class="dv">276</span><span class="sc">:</span><span class="dv">290</span>,</span>
+<span id="cb9-36"><a href="#cb9-36" tabindex="-1"></a>    <span class="fu">matrix</span>(plot_data<span class="sc">$</span>neg_log10_p, <span class="at">ncol =</span> <span class="fu">ncol</span>(p_by_test)),</span>
+<span id="cb9-37"><a href="#cb9-37" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">&quot;b&quot;</span>,</span>
+<span id="cb9-38"><a href="#cb9-38" tabindex="-1"></a>    <span class="at">pch =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>,</span>
+<span id="cb9-39"><a href="#cb9-39" tabindex="-1"></a>    <span class="at">lty =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>,</span>
+<span id="cb9-40"><a href="#cb9-40" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">&quot;Polling table&quot;</span>,</span>
+<span id="cb9-41"><a href="#cb9-41" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="fu">expression</span>(<span class="sc">-</span>log[<span class="dv">10</span>](p)),</span>
+<span id="cb9-42"><a href="#cb9-42" tabindex="-1"></a>    <span class="at">xaxt =</span> <span class="st">&quot;n&quot;</span></span>
+<span id="cb9-43"><a href="#cb9-43" tabindex="-1"></a>  )</span>
+<span id="cb9-44"><a href="#cb9-44" tabindex="-1"></a>  <span class="fu">axis</span>(<span class="dv">1</span>, <span class="at">at =</span> <span class="dv">276</span><span class="sc">:</span><span class="dv">290</span>, <span class="at">labels =</span> <span class="dv">276</span><span class="sc">:</span><span class="dv">290</span>)</span>
+<span id="cb9-45"><a href="#cb9-45" tabindex="-1"></a>  <span class="fu">legend</span>(<span class="st">&quot;topright&quot;</span>, <span class="at">legend =</span> <span class="fu">colnames</span>(p_by_test), <span class="at">pch =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>, <span class="at">lty =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>, <span class="at">bty =</span> <span class="st">&quot;n&quot;</span>)</span>
+<span id="cb9-46"><a href="#cb9-46" tabindex="-1"></a>}</span></code></pre></div>
+<div class="float">
+<img role="img" aria-label="Comparison of -log10(p) across different test statistics." src="data:image/png;base64,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" alt="Comparison of -log10(p) across different test statistics." />
+<div class="figcaption">Comparison of -log10(p) across different test
+statistics.</div>
+</div>
+</div>
+<div id="methodological-scope-and-limitations" class="section level1">
+<h1>Methodological Scope and Limitations</h1>
+<p>When interpreting these results, two methodological aspects must be
+kept in mind:</p>
+<ol style="list-style-type: decimal">
+<li><strong>Plug-in estimation</strong>: The leave-one-out probability
+vector <span class="math inline">\(\widehat{\mathbf{p}}^{(-m)}\)</span>
+is estimated from data and then treated as known by
+<code>pval_fourier()</code>. The resulting numbers should strictly be
+interpreted as <strong>plug-in goodness-of-fit <span class="math inline">\(p\)</span>-values</strong>.</li>
+<li><strong>Nature of the anomaly</strong>: A vanishingly small <span class="math inline">\(p\)</span>-value indicates that table 278 is
+highly incompatible with the assumption that all tables share a common
+multinomial distribution. It does <strong>not</strong> identify the
+cause of the discrepancy (e.g. data-entry error, transcription error, or
+genuine localized demographic differences).</li>
+<li><strong>Multiple testing</strong>: When screening many tables
+simultaneously, family-wise error rate or false discovery rate
+corrections (e.g. Bonferroni or Benjamini-Hochberg) should be
+applied.</li>
+</ol>
+</div>
+<div id="summary" class="section level1">
+<h1>Summary</h1>
+<p>This example demonstrates a clean workflow for analyzing grouped
+multinomial counts:</p>
+<ol style="list-style-type: decimal">
+<li><strong>Visualize</strong> proportions across groups to detect
+macroscopic deviations.</li>
+<li><strong>Construct</strong> leave-one-out reference probabilities to
+prevent circular influence.</li>
+<li><strong>Compute</strong> exact multinomial <span class="math inline">\(p\)</span>-values using
+<code>pval_fourier()</code>.</li>
+<li><strong>Compare</strong> multiple statistics (<code>&quot;llr&quot;</code>,
+<code>&quot;pmf&quot;</code>, <code>&quot;chi2&quot;</code>, <code>&quot;pd&quot;</code>) to confirm
+robustness.</li>
+</ol>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

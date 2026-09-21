@@ -2,12 +2,12 @@
 % Please edit documentation in R/pvalues.R
 \name{pval_exhaustive}
 \alias{pval_exhaustive}
-\title{Calculo exacto de p-valor mediante biseccion iterativa}
+\title{Exact multinomial p-value computation via iterative bisection}
 \usage{
 pval_exhaustive(
   x,
   p = rep(1/length(x), length(x)),
-  stat = c("pd", "chi2", "llr", "pmf"),
+  stat = c("llr", "pd", "chi2", "pmf"),
   lambda = 1,
   n_threads = 1,
   max_time = NULL,
@@ -16,19 +16,21 @@ pval_exhaustive(
 )
 }
 \arguments{
-\item{x}{Vector de conteos observados.}
+\item{x}{Numeric vector of observed counts for each category.}
 
-\item{p}{Vector de probabilidades teoricas bajo la hipotesis nula.}
+\item{p}{Numeric vector of theoretical probabilities under the null hypothesis.}
 
-\item{stat}{Estadistico de prueba: \code{"pd"}, \code{"chi2"}, \code{"llr"}, o \code{"pmf"}. Por defecto \code{"pd"}.}
+\item{stat}{Test statistic: \code{"llr"}, \code{"pd"}, \code{"chi2"}, or \code{"pmf"}. Default is \code{"llr"}.}
 
-\item{lambda}{Parametro real para Power Divergence cuando \code{stat = "pd"}. Por defecto 1.}
+\item{lambda}{Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.}
 
-\item{n_threads}{Cantidad de hilos a usar (entero >= 1). Por defecto 1.}
+\item{n_threads}{Number of execution threads (integer >= 1). Default is 1.}
 
-\item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
+\item{max_time}{Maximum execution time in seconds (optional).}
 
-\item{verbose}{Logico; si TRUE, imprime informacion del proceso.}
+\item{verbose}{Logical; if TRUE, prints progress information. Default is FALSE.}
+
+\item{...}{Additional internal parameters passed to the C engine.}
 }
 \value{
 Returns an S3 object of class \code{"multfourier"} with the following attributes:
@@ -44,5 +46,5 @@ Returns an S3 object of class \code{"multfourier"} with the following attributes
 }
 }
 \description{
-Calculo exacto de p-valor mediante biseccion iterativa
+Exact multinomial p-value computation via iterative bisection
 }

@@ -17,4 +17,9 @@ Description:
     either of these methods, depending on the size of the instance.
 License: GPL (>= 2)
 Encoding: UTF-8
+Suggests: 
+    knitr,
+    rmarkdown,
+    ggplot2
+VignetteBuilder: knitr
 Config/roxygen2/version: 8.1.0

@@ -266,6 +266,8 @@ typedef struct {
     real_t logp_acc;
     atomic_int_fast64_t* restrict next_n0;
     real_t p_acc;
+    const options_t* options;
+    atomic_int* timed_out;
 } iterative_bisection_args_t;
 
 static void* iterative_bisection_thread(void* args_void) {
@@ -301,6 +303,15 @@ static void* iterative_bisection_thread(void* args_void) {
 
     int_t n0_start;
     while ((n0_start = atomic_fetch_add_explicit(args->next_n0, BISECT_CHUNK, memory_order_relaxed)) <= N) {
+        if (args->timed_out && atomic_load(args->timed_out)) break;
+        if (args->options && args->options->max_time > 0.0 && isfinite(args->options->max_time)) {
+            struct timespec t_now;
+            timespec_get(&t_now, TIME_UTC);
+            if (get_dt(args->options->t_start, t_now) >= args->options->max_time) {
+                if (args->timed_out) atomic_store(args->timed_out, 1);
+                break;
+            }
+        }
         const int_t n0_end = n0_start + BISECT_CHUNK - 1 > N ? N : n0_start + BISECT_CHUNK - 1;
         for (int_t n0 = n0_start; n0 <= n0_end; n0++) {
             const real_t r0 = args->reward[n0];
@@ -326,9 +337,19 @@ static void iterative_bisection_parallel(
         const real_t* restrict log_prob,
         real_t logp_acc,
         real_t* restrict p_acc,
-        const int_t threads
+        const int_t threads,
+        const options_t* options,
+        atomic_int* timed_out
 ) {
     if (K == 1 || threads <= 1 || N == 0) {
+        if (options && options->max_time > 0.0 && isfinite(options->max_time)) {
+            struct timespec t_now;
+            timespec_get(&t_now, TIME_UTC);
+            if (get_dt(options->t_start, t_now) >= options->max_time) {
+                if (timed_out) atomic_store(timed_out, 1);
+                return;
+            }
+        }
         int_t N_remain_stack[BISECT_MAX_DEPTH], n_cur_stack[BISECT_MAX_DEPTH];
         real_t r_acc_stack[BISECT_MAX_DEPTH], logp_acc_stack[BISECT_MAX_DEPTH];
         int_t* N_remain = N_remain_stack;
@@ -363,6 +384,8 @@ static void iterative_bisection_parallel(
         args[t].logp_acc = logp_acc;
         args[t].next_n0 = &next_n0;
         args[t].p_acc = 0;
+        args[t].options = options;
+        args[t].timed_out = timed_out;
         pthread_create(&tid[t], NULL, iterative_bisection_thread, &args[t]);
     }
 
@@ -378,6 +401,15 @@ static void iterative_bisection_parallel(
 }
 
 static void exhaustive_bisection(multinomial* mult, multinomial_result* mult_res, options_t* options) {
+    if (options->max_time > 0.0 && isfinite(options->max_time)) {
+        struct timespec t_now;
+        timespec_get(&t_now, TIME_UTC);
+        if (get_dt(options->t_start, t_now) >= options->max_time) {
+            mult_res->status = 1;
+            mult_res->converged = 0;
+            return;
+        }
+    }
     const int_t N = mult->N;
     const int_t K = mult->K;
     const int_t matrix_size = K*(N+1);
@@ -391,12 +423,21 @@ static void exhaustive_bisection(multinomial* mult, multinomial_result* mult_res
 
     real_t p_acc = 0;
     const real_t logp_acc = lgac[N];
-    if (options->threads > 1) iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, &p_acc, options->threads);
-    else iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, &p_acc, 1);
-    p_acc = p_acc*EXP(-MAX_EXP);
-    if (options->verbose) printf("exhaustive = %.8e\n", p_acc);
-    mult_res->pval = p_acc;
-    mult_res->converged = 1;
+    atomic_int timed_out;
+    atomic_init(&timed_out, 0);
+    if (options->threads > 1) iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, &p_acc, options->threads, options, &timed_out);
+    else iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, &p_acc, 1, options, &timed_out);
+
+    if (atomic_load(&timed_out)) {
+        mult_res->status = 1;
+        mult_res->converged = 0;
+    } else {
+        p_acc = p_acc*EXP(-MAX_EXP);
+        if (options->verbose) printf("exhaustive = %.8e\n", p_acc);
+        mult_res->pval = p_acc;
+        mult_res->converged = 1;
+        mult_res->status = 0;
+    }
     mult_res->terms = -1;
 
     free(reward);

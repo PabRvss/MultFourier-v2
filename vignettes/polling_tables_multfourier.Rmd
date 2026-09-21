@@ -1,0 +1,395 @@
+---
+title: "Detecting Unusual Polling-Table Results with MultFourier"
+author: "Charles Thraves, Pablo Rivas, Felipe Subiabre"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Detecting Unusual Polling-Table Results with MultFourier}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 8,
+  fig.height = 4.8
+)
+```
+
+# Motivation
+
+This vignette illustrates how `MultFourier` can be used to identify unusual
+outcomes in a collection of multinomial observations. The application analyzes
+results from polling tables belonging to the same polling location in the 2024
+Chilean municipal election.
+
+Within a polling location, registered voters are assigned to polling tables
+approximately according to alphabetical order. If voter surname is unrelated to
+political preference, the underlying voting distribution should be broadly
+similar across tables in the same location. This structure provides a natural
+multinomial goodness-of-fit setting: we can estimate a reference probability
+vector from the remaining tables in the location, and then test whether the
+result observed at a given table is statistically compatible with that null
+distribution.
+
+# Data: Escuela Centenario, Iquique
+
+The example focuses on the **Escuela Centenario** polling location in Iquique.
+This location comprises 15 polling tables, numbered 276 through 290. Most tables
+contain 400 registered voters, while the final two tables are smaller.
+
+The vote matrix below records abstention, votes for four mayoral candidates,
+and null or blank votes. Columns correspond to individual polling tables.
+
+```{r data}
+library(MultFourier)
+
+votes <- matrix(
+  c(
+    # Abstention
+     96, 101, 173,  94, 106,  88,  96, 104,  88,  98, 109,  92, 104, 57, 50,
+    # Candidate A
+     37,  34,  31,  34,  37,  37,  35,  32,  40,  37,  37,  38,  36, 22, 25,
+    # Candidate B
+     39,  37,  36,  36,  26,  29,  28,  39,  39,  34,  28,  32,  35, 15, 27,
+    # Candidate C
+     99, 107, 110, 108, 127, 107, 108, 125,  89, 100, 109, 103,  98, 74, 70,
+    # Null and blank votes
+     46,  37,  42,  41,  34,  37,  45,  26,  62,  45,  48,  49,  41, 21, 21,
+    # Candidate D
+     83,  84,   8,  87,  70, 102,  88,  74,  82,  86,  69,  86,  86, 49, 44
+  ),
+  nrow = 6,
+  byrow = TRUE
+)
+
+rownames(votes) <- c(
+  "Abstention",
+  "Candidate A",
+  "Candidate B",
+  "Candidate C",
+  "Null/blank",
+  "Candidate D"
+)
+
+colnames(votes) <- as.character(276:290)
+
+table_sizes <- colSums(votes)
+table_sizes
+```
+
+The first 13 tables have exactly 400 registered voters each ($N_m = 400$),
+while tables 289 and 290 have 238 and 237 voters, respectively.
+
+# Visual Inspection
+
+Because table sizes differ slightly, proportions provide a fairer visual
+comparison than raw counts.
+
+```{r heatmap, fig.cap = "Vote proportions by polling table at Escuela Centenario."}
+prop <- sweep(votes, 2, table_sizes, "/")
+
+heat_data <- as.data.frame(as.table(prop))
+names(heat_data) <- c("Option", "Table", "Proportion")
+
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  ggplot2::ggplot(
+    heat_data,
+    ggplot2::aes(x = Table, y = Option, fill = Proportion)
+  ) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.25) +
+    ggplot2::scale_fill_gradient(low = "white", high = "black") +
+    ggplot2::labs(
+      x = "Polling table",
+      y = NULL,
+      fill = "Proportion"
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)
+    )
+} else {
+  heatmap(
+    prop,
+    Rowv = NA,
+    Colv = NA,
+    scale = "none",
+    margins = c(5, 10),
+    xlab = "Polling table",
+    ylab = ""
+  )
+}
+```
+
+Inspection of the heatmap highlights **Table 278**:
+Candidate D received only 8 votes (2%), compared with 70–100 votes
+(17%–25%) in neighboring tables, while abstention was markedly higher (173 votes).
+
+While visually salient, graphical inspection alone does not quantify how
+statistically improbable this outcome is under the multinomial model.
+
+# Leave-One-Out Reference Distribution
+
+Let $X_m = (X_{m1}, \ldots, X_{mK})$ denote the vector of observed counts at
+table $m$, with total sample size $N_m = \sum_{k=1}^K X_{mk}$.
+
+To evaluate whether table $m$ is compatible with the location as a whole without
+allowing an anomalous table to contaminate its own reference distribution, we
+estimate the null probability vector using a **leave-one-out** scheme:
+
+\[
+\widehat p_k^{(-m)}
+=
+\frac{\sum_{j \neq m} X_{jk}}{\sum_{j \neq m} N_j},
+\qquad k = 1, \ldots, K.
+\]
+
+Under this formulation, table $m$ contributes zero weight to its own reference
+vector $\widehat{\mathbf{p}}^{(-m)}$.
+
+```{r loo-probabilities}
+loo_p <- sapply(
+  seq_len(ncol(votes)),
+  function(m) {
+    other_counts <- rowSums(votes[, -m, drop = FALSE])
+    other_counts / sum(other_counts)
+  }
+)
+
+rownames(loo_p) <- rownames(votes)
+colnames(loo_p) <- colnames(votes)
+
+# Reference distribution for table 278
+round(loo_p[, "278"], 4)
+```
+
+# Detailed Analysis of Table 278
+
+For table 278, the null hypothesis posits:
+
+\[
+X_{278} \sim \mathrm{Multinomial}\left(N_{278} = 400, \; \widehat{\mathbf{p}}^{(-278)}\right).
+\]
+
+We first compare observed counts with expected counts under $\widehat{\mathbf{p}}^{(-278)}$:
+
+```{r expected-278}
+comparison_278 <- data.frame(
+  Option = rownames(votes),
+  Observed = votes[, "278"],
+  Expected = round(table_sizes["278"] * loo_p[, "278"], 1),
+  Difference = round(votes[, "278"] - table_sizes["278"] * loo_p[, "278"], 1),
+  row.names = NULL
+)
+
+knitr::kable(
+  comparison_278,
+  caption = "Observed vs. expected counts for Polling Table 278."
+)
+```
+
+Now we compute the exact multinomial $p$-value using `pval_fourier()`. By default,
+`MultFourier` employs the Log-Likelihood Ratio (`"llr"`) test statistic:
+
+```{r one-pvalue}
+fit_278 <- pval_fourier(
+  x = votes[, "278"],
+  p = loo_p[, "278"]
+)
+
+fit_278
+```
+
+The returned `multfourier` object provides direct access to all summary fields:
+* `fit_278$pval`: computed $p$-value ($\approx 9.20 \times 10^{-33}$).
+* `fit_278$stat`: test statistic used (`"Log-Likelihood Ratio"`).
+* `fit_278$n_terms`: number of Fourier expansion terms evaluated (converged in 247 terms).
+* `fit_278$time`: total execution time in seconds ($\approx 0.35$ s).
+* `fit_278$status`: completion status ID (`0` indicates full convergence).
+
+The resulting $p$-value on the order of $10^{-33}$ rigorously confirms that the
+observed pattern at table 278 is extraordinarily unlikely under the null model.
+
+# Screening All Polling Tables
+
+We now iterate over all 15 tables in Escuela Centenario. Each table is evaluated
+against its own leave-one-out reference distribution:
+
+```{r all-tables-llr}
+p_llr <- sapply(
+  colnames(votes),
+  function(m) {
+    fit <- pval_fourier(x = votes[, m], p = loo_p[, m])
+    fit$pval
+  }
+)
+
+results_llr <- data.frame(
+  Table = colnames(votes),
+  Voters = table_sizes,
+  p_value = format(p_llr, scientific = TRUE, digits = 4),
+  row.names = NULL
+)
+
+knitr::kable(
+  results_llr,
+  caption = "Leave-one-out multinomial p-values across all tables (LLR statistic)."
+)
+```
+
+We can visualize the results on a $-\log_{10}(p)$ scale, where higher values
+indicate greater discrepancy with the reference distribution:
+
+```{r pvalue-plot, fig.cap = "Leave-one-out -log10(p) across polling tables (LLR)."}
+# Floor at 1e-35 to maintain a clean graphical scale for extreme tails
+neg_log10_p <- -log10(pmax(p_llr, 1e-35))
+
+plot(
+  as.integer(names(p_llr)),
+  neg_log10_p,
+  type = "b",
+  pch = 19,
+  col = "black",
+  xlab = "Polling table",
+  ylab = expression(-log[10](p)),
+  xaxt = "n",
+  main = "Escuela Centenario: Anomaly Profile"
+)
+axis(1, at = as.integer(names(p_llr)), labels = names(p_llr))
+abline(h = -log10(0.05 / 15), lty = 2, col = "red") # Bonferroni threshold
+text(285, -log10(0.05 / 15) + 1.5, "Bonferroni threshold (alpha = 0.05)", col = "red", cex = 0.85)
+```
+
+Table 278 exhibits an astronomical signal ($-\log_{10}(p) \approx 32$), whereas
+all other tables remain within typical sampling variability.
+
+# Comparing Multinomial Test Statistics
+
+`MultFourier` supports several classic statistics to partition and order the
+multinomial sample space:
+
+1. **Probability Mass Function (`"pmf"`)**: The exact multinomial point mass
+   $\mathbb{P}(X = x)$. Outcomes with probability less than or equal to the
+   observed outcome form the rejection region.
+2. **Pearson's Chi-Square (`"chi2"`)**: Standard $\sum (O_k - E_k)^2 / E_k$ discrepancy.
+3. **Log-Likelihood Ratio (`"llr"`)**: $G^2 = 2 \sum O_k \ln(O_k / E_k)$, standard for
+   likelihood ratio tests.
+4. **Power-Divergence Family (`"pd"`)**: Cressie & Read (1984) family parameterized
+   by $\lambda \in \mathbb{R}$. We use $\lambda = 2/3$, a recommended choice
+   balancing Pearson ($\lambda = 1$) and LLR ($\lambda \to 0$).
+
+```{r compare-tests}
+test_specs <- list(
+  "PMF"                   = list(stat = "pmf"),
+  "Pearson (Chi2)"        = list(stat = "chi2"),
+  "Log-Likelihood Ratio"  = list(stat = "llr"),
+  "Power Divergence (2/3)"= list(stat = "pd", lambda = 2/3)
+)
+
+p_by_test <- sapply(
+  test_specs,
+  function(spec) {
+    sapply(
+      colnames(votes),
+      function(m) {
+        args <- list(x = votes[, m], p = loo_p[, m], stat = spec$stat)
+        if (!is.null(spec$lambda)) args$lambda <- spec$lambda
+        fit <- do.call(pval_fourier, args)
+        fit$pval
+      }
+    )
+  }
+)
+
+comparison <- data.frame(
+  Table = colnames(votes),
+  round(p_by_test, 4),
+  check.names = FALSE,
+  row.names = NULL
+)
+
+knitr::kable(
+  comparison,
+  caption = "Leave-one-out p-values across different test statistics."
+)
+```
+
+Notice that for typical tables (e.g. 276, 277, 282, 285), all statistics yield
+comparable $p$-values. For table 278, every statistic produces a $p$-value
+essentially equal to zero ($\le 10^{-13}$), showing that the detection of the
+anomaly is completely robust to the choice of statistic.
+
+```{r compare-tests-plot, fig.cap = "Comparison of -log10(p) across different test statistics."}
+plot_data <- data.frame(
+  Table   = rep(as.integer(colnames(votes)), times = ncol(p_by_test)),
+  Test    = rep(colnames(p_by_test), each = nrow(p_by_test)),
+  p_value = as.vector(p_by_test)
+)
+
+# Display transform floored at 1e-35 for visual clarity
+plot_data$neg_log10_p <- -log10(pmax(plot_data$p_value, 1e-35))
+
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = Table,
+      y = neg_log10_p,
+      color = Test,
+      shape = Test,
+      linetype = Test
+    )
+  ) +
+    ggplot2::geom_line(linewidth = 0.6) +
+    ggplot2::geom_point(size = 2.2) +
+    ggplot2::scale_x_continuous(breaks = 276:290) +
+    ggplot2::labs(
+      x = "Polling table",
+      y = expression(-log[10](p)),
+      color = "Test Statistic",
+      shape = "Test Statistic",
+      linetype = "Test Statistic"
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(legend.position = "bottom")
+} else {
+  matplot(
+    276:290,
+    matrix(plot_data$neg_log10_p, ncol = ncol(p_by_test)),
+    type = "b",
+    pch = 1:4,
+    lty = 1:4,
+    xlab = "Polling table",
+    ylab = expression(-log[10](p)),
+    xaxt = "n"
+  )
+  axis(1, at = 276:290, labels = 276:290)
+  legend("topright", legend = colnames(p_by_test), pch = 1:4, lty = 1:4, bty = "n")
+}
+```
+
+# Methodological Scope and Limitations
+
+When interpreting these results, two methodological aspects must be kept in mind:
+
+1. **Plug-in estimation**: The leave-one-out probability vector $\widehat{\mathbf{p}}^{(-m)}$
+   is estimated from data and then treated as known by `pval_fourier()`. The resulting
+   numbers should strictly be interpreted as **plug-in goodness-of-fit $p$-values**.
+2. **Nature of the anomaly**: A vanishingly small $p$-value indicates that table 278
+   is highly incompatible with the assumption that all tables share a common multinomial
+   distribution. It does **not** identify the cause of the discrepancy (e.g. data-entry
+   error, transcription error, or genuine localized demographic differences).
+3. **Multiple testing**: When screening many tables simultaneously, family-wise error
+   rate or false discovery rate corrections (e.g. Bonferroni or Benjamini-Hochberg)
+   should be applied.
+
+# Summary
+
+This example demonstrates a clean workflow for analyzing grouped multinomial counts:
+
+1. **Visualize** proportions across groups to detect macroscopic deviations.
+2. **Construct** leave-one-out reference probabilities to prevent circular influence.
+3. **Compute** exact multinomial $p$-values using `pval_fourier()`.
+4. **Compare** multiple statistics (`"llr"`, `"pmf"`, `"chi2"`, `"pd"`) to confirm robustness.

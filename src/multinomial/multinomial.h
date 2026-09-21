@@ -325,6 +325,14 @@ static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const op
 
     int_t j_min = -1;
     while (gamma2 - gamma1 > options->eps_gamma) {
+        if (options->max_time > 0.0 && isfinite(options->max_time)) {
+            struct timespec t_check;
+            timespec_get(&t_check, TIME_UTC);
+            if (get_dt(options->t_start, t_check) >= options->max_time) {
+                mult_res->status = 1; // Maximum time reached
+                goto finish;
+            }
+        }
         const real_t delta = (n_gammas > 1) ? ((gamma2 - gamma1)/((real_t)n_gammas - 1)) : 0.0;
         
         for (int_t i=0; i<vecs; i++) {
@@ -380,7 +388,7 @@ static void fill_gamma(multinomial* mult, multinomial_result* mult_res, const op
 
     finish:
     mult->gamma = gamma;
-    if (isnan(gamma) || !isfinite(gamma)) {
+    if (mult_res->status == 0 && (isnan(gamma) || !isfinite(gamma))) {
         mult_res->status = 3; // Could not solve the optimization of gamma
     }
     if (N == 0) mult->l_rate = 0;

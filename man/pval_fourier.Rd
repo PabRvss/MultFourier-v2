@@ -2,59 +2,59 @@
 % Please edit documentation in R/pvalues.R
 \name{pval_fourier}
 \alias{pval_fourier}
-\title{Calculo de p-valor mediante inversion de series de Fourier}
+\title{Multinomial p-value computation via Fourier series inversion}
 \usage{
 pval_fourier(
   x,
   p = rep(1/length(x), length(x)),
-  stat = c("pd", "chi2", "llr", "pmf"),
+  stat = c("llr", "pd", "chi2", "pmf"),
   lambda = 1,
   undersampling = 1,
+  rel_eps = 0.001,
+  B = 30,
+  max_terms = 10000,
+  max_time = NULL,
   avg_window = 0,
   avg_flat = FALSE,
-  rel_eps = 0.001,
-  max_terms = 10000,
-  B = 30,
   n_threads = min(2L, parallel::detectCores()),
   precision = c("double", "double-double"),
   precompute = TRUE,
-  max_time = NULL,
   verbose = FALSE,
   ...
 )
 }
 \arguments{
-\item{x}{Vector de conteos observados en cada categoria.}
+\item{x}{Numeric vector of observed counts for each category.}
 
-\item{p}{Vector de probabilidades teoricas bajo la hipotesis nula (suman 1).}
+\item{p}{Numeric vector of theoretical probabilities under the null hypothesis (must sum to 1).}
 
-\item{stat}{Estadistico de prueba: \code{"pd"} (Power Divergence), \code{"chi2"} (Chi-cuadrado), \code{"llr"} (Log-Likelihood Ratio), o \code{"pmf"} (Probabilidad multinomial puntual). Por defecto \code{"pd"}.}
+\item{stat}{Test statistic: \code{"llr"} (Log-Likelihood Ratio), \code{"pd"} (Power Divergence), \code{"chi2"} (Pearson's Chi-squared), or \code{"pmf"} (Multinomial Point Probability Mass). Default is \code{"llr"}.}
 
-\item{lambda}{Parametro real para Power Divergence cuando \code{stat = "pd"}. Por defecto 1.}
+\item{lambda}{Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.}
 
-\item{undersampling}{Factor de submuestreo (> 0) para el periodo en la serie de Fourier. Por defecto 1.}
+\item{undersampling}{Undersampling factor (> 0) for the period in the Fourier series. Default is 1.}
 
-\item{avg_window}{Fraccion de sumas parciales finales a promediar (entre 0 y 1). Por defecto 0.}
+\item{rel_eps}{Relative convergence tolerance (>= 0). Default is 0.001.}
 
-\item{avg_flat}{Logico; si TRUE usa promedio plano; si FALSE pondera linealmente segun proximidad al final. Por defecto FALSE.}
+\item{B}{Integer >= 0; number of consecutive terms within tolerance required for convergence. Default is 30.}
 
-\item{rel_eps}{Tolerancia relativa de convergencia (>= 0). Por defecto 1e-3.}
+\item{max_terms}{Maximum number of harmonic terms to evaluate in the series (positive integer). Default is 10000.}
 
-\item{max_terms}{Numero maximo de armonicos a evaluar en la serie (entero positivo). Por defecto 10000.}
+\item{max_time}{Maximum execution time in seconds (optional).}
 
-\item{B}{Entero >= 0; cantidad de terminos consecutivos requeridos para convergencia. Por defecto 30.}
+\item{avg_window}{Fraction of final partial sums to average (between 0 and 1). Default is 0.}
 
-\item{n_threads}{Cantidad de hilos de ejecucion (entero positivo >= 1). Por defecto \code{min(2L, parallel::detectCores())}.}
+\item{avg_flat}{Logical; if TRUE, uses a flat moving average; if FALSE, applies linear weighting towards the end. Default is FALSE.}
 
-\item{precision}{Precision aritmetica: "double" (estandar) o "double-double" (alta precision).}
+\item{n_threads}{Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.}
 
-\item{precompute}{Logico; si TRUE, usa precomputo de transformadas para aceleracion.}
+\item{precision}{Arithmetic precision: "double" (standard) or "double-double" (extended precision).}
 
-\item{max_time}{Tiempo maximo de ejecucion en segundos (opcional).}
+\item{precompute}{Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.}
 
-\item{verbose}{Logico; si TRUE, imprime informacion del progreso.}
+\item{verbose}{Logical; if TRUE, prints progress information. Default is FALSE.}
 
-\item{...}{Parametros adicionales internos pasados al motor de C.}
+\item{...}{Additional internal parameters passed to the C engine (e.g. \code{enum_cutoff = 7.4}, the threshold for \eqn{\log_{10}} support size under which exact bisection is selected, corresponding to approximately 1 second of execution).}
 }
 \value{
 Returns an S3 object of class \code{"multfourier"} with the following attributes:
@@ -64,7 +64,7 @@ Returns an S3 object of class \code{"multfourier"} with the following attributes
   \item{pval}{The computed p-value.}
   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
   \item{W}{The effective width of the distribution support interval.}
-  \item{stat}{A string describing the test statistic used (e.g. \code{"chi2"}, \code{"llr"}, \code{"pmf"}, or \code{"pd (lambda = ...)"}).}
+  \item{stat}{A string describing the test statistic used (e.g. \code{"Log-Likelihood Ratio"}, \code{"Pearson's Chi-Square"}, \code{"Probability Mass Function"}, or \code{"power-divergence (lambda = ...)"}).}
   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
   \item{time}{The total execution time of the algorithm in seconds.}
@@ -82,5 +82,5 @@ Returns an S3 object of class \code{"multfourier"} with the following attributes
 }
 }
 \description{
-Calculo de p-valor mediante inversion de series de Fourier
+Multinomial p-value computation via Fourier series inversion
 }

@@ -30,6 +30,7 @@ typedef struct {
     int_t vecs_per_thread;
 
     double max_time;    // max execution time in seconds (< 0 or INFINITY for no limit)
+    struct timespec t_start;
 
     int_t verbose;
     int_t print_freq;
@@ -44,7 +45,7 @@ static void set_options_default(options_t* options) {
     options->undersampling = 1.0;
 
     options->eps_gamma = 1e-2;
-    options->enum_cutoff = 0.0;
+    options->enum_cutoff = 7.4;
 
     options->gamma_precision = FFT_REAL;
     options->fft_precision = FFT_REAL;

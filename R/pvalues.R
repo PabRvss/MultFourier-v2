@@ -62,23 +62,26 @@ build_multfourier_s3 <- function(raw, x, p, elapsed, requested_method, stat_labe
 }
 
 # Helper interno para resolver y validar el estadistico y lambda
-resolve_stat_lambda <- function(stat, lambda) {
-  stat <- match.arg(stat, c("pd", "chi2", "llr", "pmf"))
+resolve_stat_lambda <- function(stat, lambda, has_lambda = FALSE) {
+  stat <- match.arg(stat, c("llr", "pd", "chi2", "pmf"))
+  if (has_lambda && stat != "pd") {
+    warning('Parameter lambda is ignored since stat is not "pd"')
+  }
   if (stat == "chi2") {
     lambda_val <- 1.0
-    stat_label <- "chi2"
+    stat_label <- "Pearson's Chi-Square"
   } else if (stat == "llr") {
     lambda_val <- 0.0
-    stat_label <- "llr"
+    stat_label <- "Log-Likelihood Ratio"
   } else if (stat == "pmf") {
     lambda_val <- NaN
-    stat_label <- "pmf"
+    stat_label <- "Probability Mass Function"
   } else { # "pd"
     if (length(lambda) != 1L || !is.numeric(lambda) || !is.finite(lambda)) {
-      stop("'lambda' debe ser un numero real finito.")
+      stop("'lambda' must be a single finite real number.")
     }
     lambda_val <- as.numeric(lambda)
-    stat_label <- sprintf("pd (lambda = %s)", format(lambda_val))
+    stat_label <- sprintf("power-divergence (lambda = %s)", format(lambda_val))
   }
   list(stat = stat, lambda = lambda_val, label = stat_label)
 }
@@ -89,32 +92,32 @@ resolve_n_threads <- function(n_threads) {
   if (is.na(max_cores) || max_cores < 1L) max_cores <- 1L
   n_threads <- as.integer(n_threads)
   if (is.na(n_threads) || n_threads < 1L) {
-    stop("'n_threads' debe ser un entero positivo mayor o igual a 1.")
+    stop("'n_threads' must be a positive integer greater than or equal to 1.")
   }
   min(n_threads, max_cores)
 }
 
-#' Calculo de p-valor mediante metodo flexible
+#' Multinomial p-value computation via flexible method
 #'
-#' Evalua si la dimension del soporte multinomial permite enumeracion exacta
-#' (biseccion iterativa) o si deriva al metodo de inversion de Fourier.
+#' Evaluates whether the dimension of the multinomial support allows exact
+#' enumeration (iterative bisection) or routes to the Fourier inversion series method.
 #'
-#' @param x Vector de conteos observados en cada categoria.
-#' @param p Vector de probabilidades teoricas bajo la hipotesis nula (suman 1).
-#' @param stat Estadistico de prueba: \code{"pd"} (Power Divergence), \code{"chi2"} (Chi-cuadrado), \code{"llr"} (Log-Likelihood Ratio), o \code{"pmf"} (Probabilidad multinomial puntual). Por defecto \code{"pd"}.
-#' @param lambda Parametro real para Power Divergence cuando \code{stat = "pd"}. Por defecto 1.
-#' @param undersampling Factor de submuestreo (> 0) para el periodo en la serie de Fourier. Por defecto 1.
-#' @param avg_window Fraccion de sumas parciales finales a promediar (entre 0 y 1). Por defecto 0.
-#' @param avg_flat Logico; si TRUE usa promedio plano; si FALSE pondera linealmente segun proximidad al final. Por defecto FALSE.
-#' @param rel_eps Tolerancia relativa de convergencia (>= 0). Por defecto 1e-3.
-#' @param max_terms Numero maximo de armonicos a evaluar en la serie (entero positivo). Por defecto 10000.
-#' @param B Entero >= 0; cantidad de terminos consecutivos requeridos para convergencia. Por defecto 30.
-#' @param n_threads Cantidad de hilos de ejecucion (entero positivo >= 1). Por defecto \code{min(2L, parallel::detectCores())}.
-#' @param precision Precision aritmetica: "double" (estandar) o "double-double" (alta precision).
-#' @param precompute Logico; si TRUE, usa precomputo de transformadas para aceleracion.
-#' @param max_time Tiempo maximo de ejecucion en segundos (opcional).
-#' @param verbose Logico; si TRUE, imprime informacion del progreso.
-#' @param ... Parametros adicionales internos pasados al motor de C.
+#' @param x Numeric vector of observed counts for each category.
+#' @param p Numeric vector of theoretical probabilities under the null hypothesis (must sum to 1).
+#' @param stat Test statistic: \code{"llr"} (Log-Likelihood Ratio), \code{"pd"} (Power Divergence), \code{"chi2"} (Pearson's Chi-squared), or \code{"pmf"} (Multinomial Point Probability Mass). Default is \code{"llr"}.
+#' @param lambda Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.
+#' @param undersampling Undersampling factor (> 0) for the period in the Fourier series. Default is 1.
+#' @param rel_eps Relative convergence tolerance (>= 0). Default is 0.001.
+#' @param B Integer >= 0; number of consecutive terms within tolerance required for convergence. Default is 30.
+#' @param max_terms Maximum number of harmonic terms to evaluate in the series (positive integer). Default is 10000.
+#' @param max_time Maximum execution time in seconds (optional).
+#' @param avg_window Fraction of final partial sums to average (between 0 and 1). Default is 0.
+#' @param avg_flat Logical; if TRUE, uses a flat moving average; if FALSE, applies linear weighting towards the end. Default is FALSE.
+#' @param n_threads Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.
+#' @param precision Arithmetic precision: "double" (standard) or "double-double" (extended precision).
+#' @param precompute Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.
+#' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
+#' @param ... Additional internal parameters passed to the C engine (e.g. \code{enum_cutoff = 7.4}, the threshold for \eqn{\log_{10}} support size under which exact bisection is selected, corresponding to approximately 1 second of execution).
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
 #' \describe{
 #'   \item{x}{The input vector of observed realizations for each category.}
@@ -122,7 +125,7 @@ resolve_n_threads <- function(n_threads) {
 #'   \item{pval}{The computed p-value.}
 #'   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
 #'   \item{W}{The effective width of the distribution support interval.}
-#'   \item{stat}{A string describing the test statistic used (e.g. \code{"chi2"}, \code{"llr"}, \code{"pmf"}, or \code{"pd (lambda = ...)"}).}
+#'   \item{stat}{A string describing the test statistic used (e.g. \code{"Log-Likelihood Ratio"}, \code{"Pearson's Chi-Square"}, \code{"Probability Mass Function"}, or \code{"power-divergence (lambda = ...)"}).}
 #'   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
 #'   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
 #'   \item{time}{The total execution time of the algorithm in seconds.}
@@ -140,30 +143,31 @@ resolve_n_threads <- function(n_threads) {
 #' }
 #' @useDynLib MultFourier, c_run_multfourier
 #' @export
-pval_flexible <- function(x, p = rep(1/length(x), length(x)),
-                          stat = c("pd", "chi2", "llr", "pmf"),
+pval_flexible <- function(x,
+                          p = rep(1/length(x), length(x)),
+                          stat = c("llr", "pd", "chi2", "pmf"),
                           lambda = 1,
                           undersampling = 1,
+                          rel_eps = 0.001,
+                          B = 30,
+                          max_terms = 10000,
+                          max_time = NULL,
                           avg_window = 0,
                           avg_flat = FALSE,
-                          rel_eps = 1e-3,
-                          max_terms = 10000,
-                          B = 30,
                           n_threads = min(2L, parallel::detectCores()),
                           precision = c("double", "double-double"),
                           precompute = TRUE,
-                          max_time = NULL,
                           verbose = FALSE,
                           ...) {
-  if (length(x) != length(p)) stop("Los vectores 'x' y 'p' deben tener la misma longitud.")
-  if (any(x < 0) || any(p <= 0)) stop("Conteos no negativos y probabilidades positivas.")
-  if (undersampling <= 0) stop("'undersampling' debe ser estrictamente mayor a cero.")
-  if (avg_window < 0 || avg_window > 1) stop("'avg_window' debe estar entre 0 y 1.")
-  if (rel_eps < 0) stop("'rel_eps' debe ser mayor o igual que 0.")
-  if (max_terms <= 0) stop("'max_terms' debe ser un entero positivo.")
-  if (B < 0) stop("'B' debe ser un entero mayor o igual que 0.")
+  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
+  if (any(x < 0) || any(p <= 0)) stop("Counts must be non-negative and probabilities strictly positive.")
+  if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
+  if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
+  if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
+  if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
+  if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
 
-  st <- resolve_stat_lambda(stat, lambda)
+  st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
   threads_val <- resolve_n_threads(n_threads)
   precision <- match.arg(precision)
 
@@ -192,15 +196,16 @@ pval_flexible <- function(x, p = rep(1/length(x), length(x)),
   build_multfourier_s3(raw, x, p, elapsed, "flexible", st$label)
 }
 
-#' Calculo exacto de p-valor mediante biseccion iterativa
+#' Exact multinomial p-value computation via iterative bisection
 #'
-#' @param x Vector de conteos observados.
-#' @param p Vector de probabilidades teoricas bajo la hipotesis nula.
-#' @param stat Estadistico de prueba: \code{"pd"}, \code{"chi2"}, \code{"llr"}, o \code{"pmf"}. Por defecto \code{"pd"}.
-#' @param lambda Parametro real para Power Divergence cuando \code{stat = "pd"}. Por defecto 1.
-#' @param n_threads Cantidad de hilos a usar (entero >= 1). Por defecto 1.
-#' @param max_time Tiempo maximo de ejecucion en segundos (opcional).
-#' @param verbose Logico; si TRUE, imprime informacion del proceso.
+#' @param x Numeric vector of observed counts for each category.
+#' @param p Numeric vector of theoretical probabilities under the null hypothesis.
+#' @param stat Test statistic: \code{"llr"}, \code{"pd"}, \code{"chi2"}, or \code{"pmf"}. Default is \code{"llr"}.
+#' @param lambda Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.
+#' @param n_threads Number of execution threads (integer >= 1). Default is 1.
+#' @param max_time Maximum execution time in seconds (optional).
+#' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
+#' @param ... Additional internal parameters passed to the C engine.
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
 #' \describe{
 #'   \item{x}{The input vector of observed realizations for each category.}
@@ -213,17 +218,18 @@ pval_flexible <- function(x, p = rep(1/length(x), length(x)),
 #'   \item{method}{A string with value \code{"exhaustive"}.}
 #' }
 #' @export
-pval_exhaustive <- function(x, p = rep(1/length(x), length(x)),
-                            stat = c("pd", "chi2", "llr", "pmf"),
+pval_exhaustive <- function(x,
+                            p = rep(1/length(x), length(x)),
+                            stat = c("llr", "pd", "chi2", "pmf"),
                             lambda = 1,
                             n_threads = 1,
                             max_time = NULL,
                             verbose = FALSE,
                             ...) {
-  if (length(x) != length(p)) stop("Los vectores 'x' y 'p' deben tener la misma longitud.")
-  if (any(x < 0) || any(p <= 0)) stop("Conteos no negativos y probabilidades positivas.")
+  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
+  if (any(x < 0) || any(p <= 0)) stop("Counts must be non-negative and probabilities strictly positive.")
 
-  st <- resolve_stat_lambda(stat, lambda)
+  st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
   threads_val <- resolve_n_threads(n_threads)
 
   opts <- list(
@@ -243,7 +249,7 @@ pval_exhaustive <- function(x, p = rep(1/length(x), length(x)),
   build_multfourier_s3(raw, x, p, elapsed, "exhaustive", st$label)
 }
 
-#' Calculo de p-valor mediante inversion de series de Fourier
+#' Multinomial p-value computation via Fourier series inversion
 #'
 #' @inheritParams pval_flexible
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
@@ -253,7 +259,7 @@ pval_exhaustive <- function(x, p = rep(1/length(x), length(x)),
 #'   \item{pval}{The computed p-value.}
 #'   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
 #'   \item{W}{The effective width of the distribution support interval.}
-#'   \item{stat}{A string describing the test statistic used (e.g. \code{"chi2"}, \code{"llr"}, \code{"pmf"}, or \code{"pd (lambda = ...)"}).}
+#'   \item{stat}{A string describing the test statistic used (e.g. \code{"Log-Likelihood Ratio"}, \code{"Pearson's Chi-Square"}, \code{"Probability Mass Function"}, or \code{"power-divergence (lambda = ...)"}).}
 #'   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
 #'   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
 #'   \item{time}{The total execution time of the algorithm in seconds.}
@@ -270,30 +276,31 @@ pval_exhaustive <- function(x, p = rep(1/length(x), length(x)),
 #'   \item{method}{A string with value \code{"fourier"}.}
 #' }
 #' @export
-pval_fourier <- function(x, p = rep(1/length(x), length(x)),
-                         stat = c("pd", "chi2", "llr", "pmf"),
+pval_fourier <- function(x,
+                         p = rep(1/length(x), length(x)),
+                         stat = c("llr", "pd", "chi2", "pmf"),
                          lambda = 1,
                          undersampling = 1,
+                         rel_eps = 0.001,
+                         B = 30,
+                         max_terms = 10000,
+                         max_time = NULL,
                          avg_window = 0,
                          avg_flat = FALSE,
-                         rel_eps = 1e-3,
-                         max_terms = 10000,
-                         B = 30,
                          n_threads = min(2L, parallel::detectCores()),
                          precision = c("double", "double-double"),
                          precompute = TRUE,
-                         max_time = NULL,
                          verbose = FALSE,
                          ...) {
-  if (length(x) != length(p)) stop("Los vectores 'x' y 'p' deben tener la misma longitud.")
-  if (any(x < 0) || any(p <= 0)) stop("Conteos no negativos y probabilidades positivas.")
-  if (undersampling <= 0) stop("'undersampling' debe ser estrictamente mayor a cero.")
-  if (avg_window < 0 || avg_window > 1) stop("'avg_window' debe estar entre 0 y 1.")
-  if (rel_eps < 0) stop("'rel_eps' debe ser mayor o igual que 0.")
-  if (max_terms <= 0) stop("'max_terms' debe ser un entero positivo.")
-  if (B < 0) stop("'B' debe ser un entero mayor o igual que 0.")
+  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
+  if (any(x < 0) || any(p <= 0)) stop("Counts must be non-negative and probabilities strictly positive.")
+  if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
+  if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
+  if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
+  if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
+  if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
 
-  st <- resolve_stat_lambda(stat, lambda)
+  st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
   threads_val <- resolve_n_threads(n_threads)
   precision <- match.arg(precision)
 
@@ -322,32 +329,32 @@ pval_fourier <- function(x, p = rep(1/length(x), length(x)),
   build_multfourier_s3(raw, x, p, elapsed, "fourier", st$label)
 }
 
-#' Metodo print para objetos de clase multfourier
+#' Print method for multfourier objects
 #'
-#' @param x Objeto devuelto por pval_fourier, pval_exhaustive o pval_flexible.
-#' @param ... Argumentos adicionales no utilizados.
+#' @param x Object of class \code{"multfourier"} returned by \code{pval_fourier}, \code{pval_exhaustive}, or \code{pval_flexible}.
+#' @param ... Additional arguments (currently unused).
 #'
-#' @return Retorna el objeto de forma invisible.
+#' @return Invisibly returns the input object.
 #' @export
 print.multfourier <- function(x, ...) {
   cat("Multinomial Test (MultFourier)\n")
   cat("------------------------------\n")
-  cat("Method:      ", x$method, "\n")
-  cat("Statistic:   ", x$stat, "\n")
-  cat("p-value:     ", format(x$pval, digits = 8), "\n")
-  cat("Status:      ", x$status, paste0("(", x$message, ")"), "\n")
+  cat(sprintf("%-11s: %s\n", "Method", x$method))
+  cat(sprintf("%-11s: %s\n", "Statistic", x$stat))
+  cat(sprintf("%-11s: %s\n", "p-value", format(x$pval, digits = 8)))
+  cat(sprintf("%-11s: %s\n", "Status", paste0(x$status, " (", x$message, ")")))
   if (!is.null(x$Gamma) && !is.na(x$Gamma)) {
-    cat("Gamma:       ", format(x$Gamma, digits = 6), "\n")
+    cat(sprintf("%-11s: %s\n", "Gamma", format(x$Gamma, digits = 6)))
   }
   if (!is.null(x$Time_gamma) && !is.na(x$Time_gamma)) {
-    cat("Time gamma:  ", format(x$Time_gamma, digits = 4), "seconds\n")
+    cat(sprintf("%-11s: %s seconds\n", "Time gamma", format(x$Time_gamma, digits = 4)))
   }
   if (!is.null(x$W) && !is.na(x$W)) {
-    cat("W:           ", format(x$W, digits = 6), "\n")
+    cat(sprintf("%-11s: %s\n", "W", format(x$W, digits = 6)))
   }
   if (!is.null(x$n_terms) && !is.na(x$n_terms)) {
-    cat("Terms:       ", x$n_terms, "\n")
+    cat(sprintf("%-11s: %s\n", "Terms", x$n_terms))
   }
-  cat("Time:        ", sprintf("%.6f", x$time), "seconds\n")
+  cat(sprintf("%-11s: %s seconds\n", "Time", sprintf("%.6f", x$time)))
   invisible(x)
 }

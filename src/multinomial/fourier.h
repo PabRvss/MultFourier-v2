@@ -219,16 +219,14 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
     err_diag_init(&diag, max_chunks*step);
     int_t iter = 0;
 
-    struct timespec t_series_start;
-    timespec_get(&t_series_start, TIME_UTC);
-
     for (int_t n=0; n < max_chunks; n++) {
         /* Check max_time after each chunk */
         if (options->max_time > 0.0 && isfinite(options->max_time)) {
             struct timespec t_now;
             timespec_get(&t_now, TIME_UTC);
-            if (get_dt(t_series_start, t_now) >= options->max_time) {
+            if (get_dt(options->t_start, t_now) >= options->max_time) {
                 mult_res->status = 1; // Maximum time reached
+                if (n > 0) iter--;
                 goto finish;
             }
         }
@@ -236,6 +234,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
         /* Check for numerical explosion */
         if (!finiteq_quad(p) || isnanq_quad(p) || fabsq_quad(p) > 1e100) {
             p = NAN;
+            sums_arr[iter] = p;
             mult_res->status = 4; // Magnitude explosion / numerical instability
             converged_full = 0;
             goto finish;
@@ -263,6 +262,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
             const quad_t delta_re = crealq_quad(res_arr[iter]);
             if (!finiteq_quad(delta_re) || isnanq_quad(delta_re) || fabsq_quad(delta_re) > 1e100) {
                 p = NAN;
+                sums_arr[iter] = p;
                 mult_res->status = 4; // Magnitude explosion
                 converged_full = 0;
                 goto finish;
@@ -276,7 +276,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
             sums_arr[iter] = p;
 
             const quad_t frac = fabsq_quad(delta_re/p_prev);
-            const int converged = (B > 0) && (p > 0.0) && (frac <= threshold);
+            const int converged = (B > 0) && (p > 0.0) && (frac < threshold);
             converged_count = converged ? converged_count + 1 : 0;
             p_prev = p;
 
@@ -287,6 +287,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
             }
         }
     }
+    iter--;
 
     finish:
     /* Windowed series averaging to dampen Gibbs oscillations */
@@ -312,7 +313,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
 
     mult_res->pval = (double)p;
     mult_res->converged = converged_full;
-    mult_res->terms = iter;
+    mult_res->terms = (iter >= 0) ? (iter + 1) : 0;
 
     if (!converged_full && mult_res->status == 0) {
         mult_res->status = 2; // Maximum number of terms reached

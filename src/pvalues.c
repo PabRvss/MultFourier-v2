@@ -205,11 +205,17 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
 
     struct timespec t0, t1;
     timespec_get(&t0, TIME_UTC);
+    options.t_start = t0;
 
     multinomial_result mult_res;
     memset(&mult_res, 0, sizeof(multinomial_result));
+    mult_res.pval = NA_REAL;
     mult_res.gamma = NA_REAL;
     mult_res.W = NA_REAL;
+    mult_res.eval_time = NA_REAL;
+    mult_res.err_rel_est = NA_REAL;
+    mult_res.n_eff = NA_REAL;
+    mult_res.nu_max_ratio = NA_REAL;
     mult_res.status = 0;
 
     multinomial* mult = get_mult(N, K, probs, &options);
@@ -222,7 +228,7 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
     } else if (strcmp(method_str, "exhaustive") == 0) {
         run_fourier = 0;
     } else { /* "flexible" */
-        real_t cutoff = get_opt_double(r_opts, "enum_cutoff", 6.5);
+        real_t cutoff = get_opt_double(r_opts, "enum_cutoff", 7.4);
         real_t supp = (lgac[N + K - 1] - lgac[N] - lgac[K - 1]) / LOG(10.0);
         run_fourier = (supp >= cutoff) ? 1 : 0;
     }
@@ -232,7 +238,16 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
         fill_mult2(mult, &mult_res, x0, &options);
         mult_res.gamma = mult->gamma;
         mult_res.W = mult->W;
-        if (mult_res.status != 3) {
+        if (mult_res.status == 0) {
+            if (options.max_time > 0.0 && isfinite(options.max_time)) {
+                struct timespec t_check;
+                timespec_get(&t_check, TIME_UTC);
+                if (get_dt(options.t_start, t_check) >= options.max_time) {
+                    mult_res.status = 1; // Maximum time reached
+                }
+            }
+        }
+        if (mult_res.status == 0) {
             series(mult, &mult_res, &options);
         }
     } else {
