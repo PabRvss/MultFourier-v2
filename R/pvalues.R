@@ -115,9 +115,9 @@ resolve_n_threads <- function(n_threads) {
 #' @param avg_window Fraction of final partial sums to average (between 0 and 1). Default is 0.
 #' @param avg_flat Logical; if TRUE, uses a flat moving average; if FALSE, applies linear weighting towards the end. Default is FALSE.
 #' @param n_threads Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.
-#' @param precision Arithmetic precision: "double" (standard) or "double-double" (extended precision).
+#' @param precision Arithmetic precision: "double" (standard) or "double-double" (extended precision). Default is "double".
 #' @param precompute Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.
-#' @param engine Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms).
+#' @param engine Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms). Default is "speedup".
 #' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
 #' @param ... Additional internal parameters passed to the C engine (e.g. \code{enum_cutoff = 7.4}, the threshold for \eqn{\log_{10}} support size under which exact bisection is selected, corresponding to approximately 1 second of execution).
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
@@ -210,7 +210,7 @@ pval_flexible <- function(x,
 #' @param lambda Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.
 #' @param n_threads Number of execution threads (integer >= 1). Default is 1.
 #' @param max_time Maximum execution time in seconds (optional).
-#' @param engine Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories).
+#' @param engine Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories). Default is "speedup".
 #' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
 #' @param ... Additional internal parameters passed to the C engine.
 #' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:

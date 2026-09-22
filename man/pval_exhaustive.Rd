@@ -29,7 +29,7 @@ pval_exhaustive(
 
 \item{max_time}{Maximum execution time in seconds (optional).}
 
-\item{engine}{Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories).}
+\item{engine}{Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories). Default is "speedup".}
 
 \item{verbose}{Logical; if TRUE, prints progress information. Default is FALSE.}
 

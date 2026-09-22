@@ -49,11 +49,11 @@ pval_flexible(
 
 \item{n_threads}{Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.}
 
-\item{precision}{Arithmetic precision: "double" (standard) or "double-double" (extended precision).}
+\item{precision}{Arithmetic precision: "double" (standard) or "double-double" (extended precision). Default is "double".}
 
 \item{precompute}{Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.}
 
-\item{engine}{Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms).}
+\item{engine}{Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms). Default is "speedup".}
 
 \item{verbose}{Logical; if TRUE, prints progress information. Default is FALSE.}
 
