@@ -270,15 +270,18 @@ $p$-value as a Fourier series and sums it until a stopping rule is met. The
 partial sums are accelerated by extrapolation, and the summation stops as soon
 as either `B` consecutive terms are each smaller than `rel_eps / B` relative to
 the partial sum, or the extrapolated values vary by at most a relative
-`rel_eps` over the last half of the terms. Throughout this vignette we use the
-defaults `B = 50` and `rel_eps = 1e-3`. The result is therefore an
+`rel_eps` over the last half of the terms. Throughout this vignette we use
+`B = 50` (the default) and `rel_eps = 1e-6`, tighter than the default `1e-3`:
+on these data it lowers the relative error by about two orders of magnitude, at
+the cost of a few thousand terms instead of a few hundred. The result is still an
 approximation whose accuracy depends on how fast the series converges;
 `rel_eps` sets how stable the sum must be, not a bound on its error.
 
 ```{r fourier-278}
 fit_278 <- pval_fourier(
   x = votes[, "278"],
-  p = loo_p[, "278"]
+  p = loo_p[, "278"],
+  rel_eps = 1e-6
 )
 
 fit_278
@@ -351,7 +354,8 @@ $\log_{10}(\text{support}) \approx 10.95$, so it uses `pval_fourier()`:
 ```{r flexible-278}
 pval_flexible(
   x = votes[, "278"],
-  p = loo_p[, "278"]
+  p = loo_p[, "278"],
+  rel_eps = 1e-6
 )$method
 ```
 
@@ -370,7 +374,7 @@ $p$-values.
 
 ```{r screening}
 p_fourier_all <- sapply(colnames(votes), function(m) {
-  pval_fourier(votes[, m], loo_p[, m])$pval
+  pval_fourier(votes[, m], loo_p[, m], rel_eps = 1e-6)$pval
 })
 
 p_exact_all <- sapply(colnames(votes), function(m) {
@@ -504,9 +508,9 @@ p_{\text{PMF}} = \sum_{y \in \Omega_N} P(y) \, \mathbf{1}\left\{ P(y) \le P(x) \
 distance between observed and expected counts, scaled by the expected counts:
 
 \[
-X^2(y) = \sum_{k=1}^{K} \frac{(y_k - N p_k)^2}{N p_k},
+\mathcal{X}^2(y) = \sum_{k=1}^{K} \frac{(y_k - N p_k)^2}{N p_k},
 \qquad
-p_{X^2} = \sum_{y \in \Omega_N} P(y) \, \mathbf{1}\left\{ X^2(y) \ge X^2(x) \right\}.
+p_{\mathcal{X}^2} = \sum_{y \in \Omega_N} P(y) \, \mathbf{1}\left\{ \mathcal{X}^2(y) \ge \mathcal{X}^2(x) \right\}.
 \]
 
 **Log-Likelihood Ratio (`"llr"`).** The statistic $G^2$ defined above for
@@ -522,8 +526,7 @@ by a real parameter $\lambda$:
 
 with the values at $\lambda = 0$ and $\lambda = -1$ defined as limits. The
 family contains Pearson's statistic ($\lambda = 1$) and the log-likelihood
-ratio ($\lambda \to 0$). We use $\lambda = 2/3$, the value recommended by
-Cressie and Read, which lies between the two.
+ratio ($\lambda \to 0$). We use $\lambda = 2/3$, which lies between the two.
 
 ```{r compare-tests}
 test_specs <- list(
@@ -542,7 +545,7 @@ run_test <- function(fun, m, spec, ...) {
 
 fits_by_test <- lapply(
   test_specs,
-  function(spec) lapply(colnames(votes), function(m) run_test(pval_fourier, m, spec))
+  function(spec) lapply(colnames(votes), function(m) run_test(pval_fourier, m, spec, rel_eps = 1e-6))
 )
 
 p_by_test <- sapply(fits_by_test, function(fits) sapply(fits, `[[`, "pval"))
@@ -572,9 +575,12 @@ knitr::kable(
 For typical stations (e.g. 276, 277, 282, 285), all statistics yield comparable
 $p$-values. Cells marked † are those where `pval_fourier()` reached its limit
 of `max_terms` terms without meeting its convergence criterion
-(`status != 0`), so the value shown there is not reliable. This happens at
-station 278 for Pearson's chi-square and for the power divergence with
-$\lambda = 2/3$. The table below compares, for station 278, the Fourier result
+(`status != 0`), so the value shown there is not reliable. This happens for
+Pearson's chi-square at stations
+`r paste(rownames(status_by_test)[status_by_test[, "Pearson (Chi2)"] != 0], collapse = ", ")`,
+and for the power divergence with $\lambda = 2/3$ at station
+`r paste(rownames(status_by_test)[status_by_test[, "Power Divergence (2/3)"] != 0], collapse = ", ")`;
+PMF and LLR converge at every station. The table below compares, for station 278, the Fourier result
 of each statistic with the exact $p$-value computed by `pval_exact()`:
 
 ```{r compare-tests-278}
@@ -603,11 +609,12 @@ knitr::kable(
 )
 ```
 
-At this station, for PMF and LLR the Fourier series converges in a few hundred
-terms and agrees with the exact value. For Pearson's chi-square and the power divergence it
+At this station, for PMF and LLR the Fourier series converges
+(`r fourier_278[["PMF"]]$n_terms` and `r fourier_278[["Log-Likelihood Ratio"]]$n_terms` terms)
+and agrees with the exact value. For Pearson's chi-square and the power divergence it
 does not converge, and raising `max_terms` does not fix this: with 100,000
 terms the chi-square result even becomes negative. The reason is structural.
-Pearson's statistic is $X^2 = \sum_k x_k^2 / (N p_k) - N$ with integer counts
+Pearson's statistic is $\mathcal{X}^2 = \sum_k x_k^2 / (N p_k) - N$ with integer counts
 $x_k$, so its values lie close to a lattice; the terms of the Fourier series
 then recur instead of cancelling, and the truncated sum does not settle. The
 power divergence with $\lambda = 2/3$ behaves similarly at this station. In
