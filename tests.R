@@ -42,11 +42,11 @@ print(fit_th)
 # 8. Bisección exhaustiva y método flexible
 x_small <- c(3, 2, 4)
 p_small <- c(0.3, 0.3, 0.4)
-fit_ex <- pval_exhaustive(x_small, p_small)
+fit_ex <- pval_exact(x_small, p_small)
 fit_fl <- pval_flexible(x_small, p_small)
 
-# 9. Manejo de inestabilidad/explosión numérica (status = 4 sin crash de R)
-fit_bad <- pval_fourier(x, p, stat = "pd", lambda = -1)
+# 9. lambda = -1 no está soportado: debe dar un error claro (antes: NaN con status = 4)
+fit_bad <- tryCatch(pval_fourier(x, p, stat = "pd", lambda = -1), error = function(e) conditionMessage(e))
 print(fit_bad)
 
 # 10. Tests de la vignette (Escuela Centenario y leave-one-out)
