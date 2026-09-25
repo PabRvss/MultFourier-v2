@@ -9,31 +9,36 @@
 Computes p-values of multinomial goodness-of-fit tests based on an additive statistic: the log-likelihood ratio, Pearson's chi-squared, the Cressie-Read power divergence, and the exact multinomial test. The main function, pval_fourier(), writes the p-value as a Fourier series in the moment-generating function of the statistic and sums it until an adaptive stopping rule is met, which makes small p-values of large instances computable. The function pval_exact() computes the exact p-value by branch pruning with bounds from a dynamic program, and pval_flexible() chooses between the two according to the size of the instance.
 }
 \details{
-\code{MultFourier} computes the p-value \eqn{P\{T(Y) \ge T(x)\}},
-\eqn{Y \sim \mathrm{Multinomial}(N, p)}, of goodness-of-fit tests based on an
-additive statistic \eqn{T}: the log-likelihood ratio \eqn{G^2}, Pearson's
-\eqn{X^2}, the Cressie--Read power divergence, and the exact multinomial test
-(ordering by probability). It is aimed at small p-values, far in the tail, and
-at instances where the support of the multinomial is too large to sum over.
+\code{MultFourier} computes the \pvalue{} \eqn{P\{T(Y) \ge T(x)\}}{P{T(Y) >= T(x)}} of a
+multinomial goodness-of-fit test, where \eqn{x} is the observation (the vector
+of observed counts in the \eqn{K} categories, with \eqn{N = \sum_k x_k}{N = sum_k x_k}
+trials), \eqn{Y \sim \mathrm{Multinomial}(N, p)}{Y ~ Multinomial(N, p)} under the null hypothesis
+with category probabilities \eqn{p}, and \eqn{T} is an additive statistic: the
+log-likelihood ratio \eqn{G^2}, Pearson's \eqn{\mathcal{X}^2}{X^2}, the
+Cressie--Read power divergence, or the probability mass function of the
+multinomial (exact multinomial test). It is aimed at small \pvalue{}s, far in
+the tail, and at instances where the support of the multinomial is too large
+to sum over.
 
 The package provides three functions:
 \itemize{
-  \item \code{\link{pval_fourier}}: writes the p-value as a Fourier series whose
+  \item \code{\link{pval_fourier}}: writes the \pvalue{} as a Fourier series whose
     terms are values of the moment-generating function of the statistic, and
     sums it until an adaptive stopping rule is met. Its cost grows slowly with
     \eqn{N} and \eqn{K}; its accuracy depends on the statistic (fast convergence
-    for \eqn{G^2} and the probability ordering, possibly none for \eqn{X^2}).
-  \item \code{\link{pval_exact}}: exact p-value by branch pruning with bounds
+    for \eqn{G^2} and the probability mass function, possibly none for
+    \eqn{\mathcal{X}^2}{X^2}).
+  \item \code{\link{pval_exact}}: exact \pvalue{} by branch pruning with bounds
     from a dynamic program, without enumerating the support. Feasible for a
-    moderate number of categories.
+    moderate number of categories and trials.
   \item \code{\link{pval_flexible}}: chooses between the two according to the
     size of the support.
 }
 All three return an object of class \code{"multfourier"}; check its
-\code{status} component before using the p-value of \code{pval_fourier}.
+\code{status} component before using the \pvalue{} of \code{pval_fourier}.
 }
 \references{
-Subiabre, F. and Thraves, C. Efficient computation of p-values for multinomial
+Subiabre, F. and Thraves, C. Efficient computation of \pvalue{}s for multinomial
 tests. Manuscript.
 }
 \seealso{

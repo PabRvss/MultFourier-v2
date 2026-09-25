@@ -9,6 +9,7 @@ pval_fourier(
   p = rep(1/length(x), length(x)),
   stat = c("llr", "pd", "chi2", "pmf"),
   lambda = NULL,
+  rescale_p = FALSE,
   undersampling = 1,
   rel_eps = 0.001,
   B = 50,
@@ -29,19 +30,25 @@ pval_fourier(
 without missing values). Their sum is the number of trials \eqn{N}.}
 
 \item{p}{Vector of category probabilities under the null hypothesis, all
-strictly positive. If they do not sum to 1 they are normalized to
-\code{p / sum(p)}, with a warning; the normalized vector is the one stored
-in the result. Default: equiprobable categories.}
+strictly positive. They must sum to 1 (up to a tolerance of
+\code{sqrt(.Machine$double.eps)}), unless \code{rescale_p = TRUE}.
+Default: equiprobable categories.}
 
 \item{stat}{Test statistic: \code{"llr"} (log-likelihood ratio \eqn{G^2}, the
-default), \code{"chi2"} (Pearson's \eqn{X^2}), \code{"pd"} (Cressie--Read
-power divergence with parameter \code{lambda}) or \code{"pmf"} (exact
-multinomial test, which orders outcomes by their probability). See Details.}
+default), \code{"chi2"} (Pearson's \eqn{\mathcal{X}^2}{X^2}), \code{"pd"}
+(Cressie--Read power divergence with parameter \code{lambda}) or
+\code{"pmf"} (probability mass function of the multinomial, i.e. the exact
+multinomial test). See Details.}
 
 \item{lambda}{Parameter \eqn{\lambda} of the power-divergence statistic; used
 only when \code{stat = "pd"}, and then required (there is no default);
-a warning is issued if it is given for another statistic. Cressie and Read
-(1984) recommend \eqn{\lambda = 2/3}. \eqn{\lambda = -1} is not supported.}
+a warning is issued if it is given for another statistic.}
+
+\item{rescale_p}{Logical; if \code{TRUE}, \code{p} is rescaled to
+\code{p / sum(p)}, so it can be given as any vector of positive weights. If
+\code{FALSE} (default) and \code{p} does not sum to 1, an error is given.
+Same argument and default as \code{rescale.p} in
+\code{\link[stats]{chisq.test}}.}
 
 \item{undersampling}{Positive factor dividing the half-width \eqn{W} of the
 Fourier period. The default 1 uses the smallest \eqn{W} for which the series
@@ -49,9 +56,9 @@ is exact. Values below 1 enlarge \eqn{W} (still exact, but more terms are
 needed); values above 1 shrink \eqn{W} below that minimum, so the series
 converges to a wrong value (aliasing). Intended for experimentation only.}
 
-\item{rel_eps}{Relative tolerance of the stopping rule (\eqn{\ge 0}). Default
+\item{rel_eps}{Relative tolerance of the stopping rule (\eqn{\ge 0}{>= 0}). Default
 0.001. It controls how stable the partial sums must be before the series is
-truncated; it is \emph{not} a bound on the error of the returned p-value.}
+truncated; it is \emph{not} a bound on the error of the returned \pvalue{}.}
 
 \item{B}{Non-negative integer used by the term-size stopping rule: the series
 stops after \code{B} consecutive terms each smaller, relative to the partial
@@ -99,8 +106,8 @@ default of \code{engine = "speedup"}). Unknown names produce a warning.}
 An object of class \code{"multfourier"}: a list with components
 \describe{
   \item{x, p}{The input counts and null probabilities (\code{p} after
-    normalization, if it did not sum to 1).}
-  \item{pval}{The computed p-value.}
+    rescaling, if \code{rescale_p = TRUE}).}
+  \item{pval}{The computed \pvalue{}.}
   \item{stat}{Name of the test statistic, e.g. \code{"Log-Likelihood Ratio"}
     or \code{"power-divergence (lambda = 0.6667)"}.}
   \item{method}{\code{"fourier"}.}
@@ -109,8 +116,8 @@ An object of class \code{"multfourier"}: a list with components
     that the series terms stay within floating-point range (a saddlepoint
     choice).}
   \item{time_gamma}{Time in seconds spent choosing \code{gamma}.}
-  \item{W}{Half-width of the Fourier period, \eqn{\max(s_{\max}, -s_{\min})}
-    over the range \eqn{[s_{\min}, s_{\max}]} of the statistic minus its
+  \item{W}{Half-width of the Fourier period, \eqn{\max(s_{\max}, -s_{\min})}{max(s_max, -s_min)}
+    over the range \eqn{[s_{\min}, s_{\max}]}{[s_min, s_max]} of the statistic minus its
     observed value, divided by \code{undersampling}.}
   \item{n_terms}{Number of series terms summed.}
   \item{status}{\code{0}: the stopping rule was met (the message reads
@@ -133,13 +140,14 @@ An object of class \code{"multfourier"}: a list with components
     the first one; values near 1 mean the terms are not decaying (a lattice-like
     statistic).}
 }
-The last four components are diagnostics of the series; they are heuristics,
+The last four components (\code{err_rel_ext}, \code{err_rel_est},
+\code{n_eff} and \code{nu_max_ratio}) are diagnostics of the series; they are heuristics,
 not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
 versions still work, with a deprecation warning.
 }
 \description{
-Computes the p-value of a multinomial goodness-of-fit test,
-\deqn{p = P\{T(Y) \ge T(x)\}, \qquad Y \sim \mathrm{Multinomial}(N, p), \quad N = \sum_k x_k,}
+Computes the \pvalue{} of a multinomial goodness-of-fit test,
+\deqn{p = P\{T(Y) \ge T(x)\}, \qquad Y \sim \mathrm{Multinomial}(N, p), \quad N = \sum_k x_k,}{p = P{T(Y) >= T(x)},   Y ~ Multinomial(N, p),   N = sum_k x_k,}
 for an additive test statistic \eqn{T}, by summing a truncated Fourier series
 whose terms are values of the moment-generating function of the statistic.
 The series is truncated by an adaptive stopping rule, so the result is an
@@ -148,19 +156,22 @@ check the returned \code{status}.
 }
 \details{
 \strong{Statistics.} All supported statistics are additive,
-\eqn{T(y) = \sum_k f_k(y_k)}, which is what the method requires. With
+\eqn{T(y) = \sum_k f_k(y_k)}{T(y) = sum_k f_k(y_k)}, which is what the method requires. With
 \eqn{E_k = N p_k}:
 \itemize{
-  \item \code{"llr"}: \eqn{G^2 = 2 \sum_k y_k \log(y_k / E_k)}.
-  \item \code{"chi2"}: \eqn{X^2 = \sum_k (y_k - E_k)^2 / E_k}.
-  \item \code{"pd"}: \eqn{2 I^\lambda = \frac{2}{\lambda(\lambda+1)} \sum_k y_k [(y_k/E_k)^\lambda - 1]}
-    (Cressie and Read, 1984); \eqn{\lambda \to 0} gives \eqn{G^2} and
-    \eqn{\lambda = 1} gives \eqn{X^2}.
-  \item \code{"pmf"}: the p-value is \eqn{P\{P(Y) \le P(x)\}}, the total
-    probability of the outcomes that are at most as likely as the observed one.
+  \item \code{"llr"}: \eqn{G^2 = 2 \sum_k y_k \log(y_k / E_k)}{G^2 = 2 sum_k y_k log(y_k / E_k)}.
+  \item \code{"chi2"}: \eqn{\mathcal{X}^2 = \sum_k (y_k - E_k)^2 / E_k}{X^2 = sum_k (y_k - E_k)^2 / E_k}.
+  \item \code{"pd"}: \eqn{2 I^\lambda = \frac{2}{\lambda(\lambda+1)} \sum_k y_k [(y_k/E_k)^\lambda - 1]}{2 I^lambda = 2 / (lambda (lambda + 1)) sum_k y_k [(y_k / E_k)^lambda - 1]}
+    (Cressie and Read, 1984); \eqn{\lambda \to 0}{lambda -> 0} gives \eqn{G^2} and
+    \eqn{\lambda = 1} gives \eqn{\mathcal{X}^2}{X^2}.
+  \item \code{"pmf"}: the probability mass function \eqn{P(y)} of the
+    multinomial under the null hypothesis (exact multinomial test). Small
+    values are the extreme ones, so the \pvalue{} is \eqn{P\{P(Y) \le P(x)\}}{P{P(Y) <= P(x)}},
+    the total probability of the outcomes that are at most as likely as the
+    observed one.
 }
 
-\strong{Which statistics converge.} The p-value is written exactly as a Fourier
+\strong{Which statistics converge.} The \pvalue{} is written exactly as a Fourier
 series for every additive statistic, but the number of terms needed for a given
 accuracy depends on the statistic. For \code{"llr"} and \code{"pmf"} the series
 typically converges in a few hundred to a few thousand terms. For \code{"chi2"},
@@ -176,9 +187,9 @@ form of QUADPACK's DQELG) and smoothed with a running median of five. The
 series stops as soon as either (i) \code{B} consecutive terms are each smaller
 than \code{rel_eps / B} relative to the partial sum, or (ii) the smoothed
 extrapolated values vary by at most a relative \code{rel_eps} over a trailing
-window covering the last half of the terms. The reported p-value is the last
+window covering the last half of the terms. The reported \pvalue{} is the last
 smoothed extrapolated value. With \code{engine = "standard"} only rule (i) is
-used and the reported p-value is the last partial sum.
+used and the reported \pvalue{} is the last partial sum.
 
 \strong{Engines.} \code{"speedup"} evaluates the terms with a Poissonized
 Cauchy-integral evaluator, chooses the exponential tilt \code{gamma} by a
@@ -192,25 +203,31 @@ same series.
 p <- c(0.1, 0.2, 0.3, 0.4)
 x <- c(35, 30, 60, 75)   # N = 200
 
+# Log-likelihood ratio
 fit <- pval_fourier(x, p, stat = "llr")
 fit
-fit$pval
+fit$pval                 # 0.00688
 fit$status               # 0: stopping rule met
+fit$n_terms              # 1208
 
-# Compare with the exact p-value
-pval_exact(x, p, stat = "llr")$pval
+# Probability mass function (exact multinomial test)
+fit_pmf <- pval_fourier(x, p, stat = "pmf")
+fit_pmf$pval             # 0.00577
+fit_pmf$status           # 0: stopping rule met
 
-# Power divergence with the Cressie-Read parameter
-pval_fourier(x, p, stat = "pd", lambda = 2/3)$pval
+# Power divergence: lambda is required
+fit_pd <- pval_fourier(x, p, stat = "pd", lambda = 2/3)
+fit_pd$pval              # 0.00384
+fit_pd$status            # 0: stopping rule met
 }
 \references{
-Subiabre, F. and Thraves, C. Efficient computation of p-values for multinomial
+Subiabre, F. and Thraves, C. Efficient computation of \pvalue{}s for multinomial
 tests. Manuscript.
 
 Cressie, N. and Read, T. R. C. (1984). Multinomial goodness-of-fit tests.
 \emph{Journal of the Royal Statistical Society, Series B}, 46(3), 440--464.
 }
 \seealso{
-\code{\link{pval_exact}} for the exact p-value,
+\code{\link{pval_exact}} for the exact \pvalue{},
   \code{\link{pval_flexible}} to choose between the two automatically.
 }

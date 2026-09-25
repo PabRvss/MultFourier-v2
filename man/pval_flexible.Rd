@@ -9,6 +9,7 @@ pval_flexible(
   p = rep(1/length(x), length(x)),
   stat = c("llr", "pd", "chi2", "pmf"),
   lambda = NULL,
+  rescale_p = FALSE,
   enum_cutoff = 10,
   undersampling = 1,
   rel_eps = 0.001,
@@ -30,21 +31,27 @@ pval_flexible(
 without missing values). Their sum is the number of trials \eqn{N}.}
 
 \item{p}{Vector of category probabilities under the null hypothesis, all
-strictly positive. If they do not sum to 1 they are normalized to
-\code{p / sum(p)}, with a warning; the normalized vector is the one stored
-in the result. Default: equiprobable categories.}
+strictly positive. They must sum to 1 (up to a tolerance of
+\code{sqrt(.Machine$double.eps)}), unless \code{rescale_p = TRUE}.
+Default: equiprobable categories.}
 
 \item{stat}{Test statistic: \code{"llr"} (log-likelihood ratio \eqn{G^2}, the
-default), \code{"chi2"} (Pearson's \eqn{X^2}), \code{"pd"} (Cressie--Read
-power divergence with parameter \code{lambda}) or \code{"pmf"} (exact
-multinomial test, which orders outcomes by their probability). See Details.}
+default), \code{"chi2"} (Pearson's \eqn{\mathcal{X}^2}{X^2}), \code{"pd"}
+(Cressie--Read power divergence with parameter \code{lambda}) or
+\code{"pmf"} (probability mass function of the multinomial, i.e. the exact
+multinomial test). See Details.}
 
 \item{lambda}{Parameter \eqn{\lambda} of the power-divergence statistic; used
 only when \code{stat = "pd"}, and then required (there is no default);
-a warning is issued if it is given for another statistic. Cressie and Read
-(1984) recommend \eqn{\lambda = 2/3}. \eqn{\lambda = -1} is not supported.}
+a warning is issued if it is given for another statistic.}
 
-\item{enum_cutoff}{Threshold on \eqn{\log_{10}} of the support size
+\item{rescale_p}{Logical; if \code{TRUE}, \code{p} is rescaled to
+\code{p / sum(p)}, so it can be given as any vector of positive weights. If
+\code{FALSE} (default) and \code{p} does not sum to 1, an error is given.
+Same argument and default as \code{rescale.p} in
+\code{\link[stats]{chisq.test}}.}
+
+\item{enum_cutoff}{Threshold on \eqn{\log_{10}}{log10} of the support size
 \eqn{{N+K-1 \choose K-1}}{choose(N+K-1, K-1)} (the number of possible count vectors). Below it the
 exact method is used, at or above it the Fourier method. Default 10. See
 Details.}
@@ -55,9 +62,9 @@ is exact. Values below 1 enlarge \eqn{W} (still exact, but more terms are
 needed); values above 1 shrink \eqn{W} below that minimum, so the series
 converges to a wrong value (aliasing). Intended for experimentation only.}
 
-\item{rel_eps}{Relative tolerance of the stopping rule (\eqn{\ge 0}). Default
+\item{rel_eps}{Relative tolerance of the stopping rule (\eqn{\ge 0}{>= 0}). Default
 0.001. It controls how stable the partial sums must be before the series is
-truncated; it is \emph{not} a bound on the error of the returned p-value.}
+truncated; it is \emph{not} a bound on the error of the returned \pvalue{}.}
 
 \item{B}{Non-negative integer used by the term-size stopping rule: the series
 stops after \code{B} consecutive terms each smaller, relative to the partial
@@ -106,17 +113,17 @@ An object of class \code{"multfourier"}, as described in
 \code{"fourier"}) shows which method was used.
 }
 \description{
-Computes the p-value with \code{\link{pval_exact}} when the instance is small
+Computes the \pvalue{} with \code{\link{pval_exact}} when the instance is small
 and with \code{\link{pval_fourier}} otherwise.
 }
 \details{
 The cost of \code{\link{pval_exact}} depends strongly on the observed counts,
 not only on the support size, and it is highest far in the tail, where small
-p-values are computed. With counts drawn from the null hypothesis it takes
-about one second on 2 threads at a support of \eqn{10^{12}} to \eqn{10^{13}}
+\pvalue{}s are computed. With counts drawn from the null hypothesis it takes
+about one second on 2 threads at a support of \eqn{10^{12}}{10^12} to \eqn{10^{13}}{10^13}
 outcomes (log-likelihood ratio, \eqn{K = 5, 6, 7}); with counts far in the
-tail it can take tens of seconds at a support of \eqn{10^{11}} (for example
-\eqn{K = 6}, \eqn{N = 400}, \eqn{p \approx 10^{-33}}). The default
+tail it can take tens of seconds at a support of \eqn{10^{11}}{10^11} (for example
+\eqn{K = 6}, \eqn{N = 400}, \eqn{p \approx 10^{-33}}{p ~ 10^-33}). The default
 \code{enum_cutoff = 10} is a simple, conservative value that keeps the exact
 method for instances where it is fast in both situations.
 
@@ -125,13 +132,21 @@ When the Fourier method is chosen and does not meet its stopping rule
 fallback to the exact method.
 }
 \examples{
-# Small instance (K = 4, N = 200): exact method
-pval_flexible(c(35, 30, 60, 75), c(0.1, 0.2, 0.3, 0.4))$method
+# Small instance (K = 4, N = 200, about 10^6 outcomes): exact method
+p <- c(0.1, 0.2, 0.3, 0.4)
+x <- c(35, 30, 60, 75)
+fit <- pval_flexible(x, p, stat = "llr")
+fit
+fit$method               # "exact"
+fit$pval                 # 0.00684
+fit$status               # 0: computation finished
 
 # Large instance (K = 8, N = 2000, about 10^19 outcomes): Fourier method
-fit <- pval_flexible(c(240, 260, 250, 270, 230, 250, 245, 255))
-fit$method
-fit$status
+x_large <- c(240, 260, 250, 270, 230, 250, 245, 255)
+fit_large <- pval_flexible(x_large, stat = "llr")
+fit_large$method         # "fourier"
+fit_large$pval           # 0.761
+fit_large$status         # 0: stopping rule met
 }
 \seealso{
 \code{\link{pval_fourier}}, \code{\link{pval_exact}}.

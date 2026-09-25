@@ -73,8 +73,9 @@ multfourier_old_names <- c(Gamma = "gamma", Time_gamma = "time_gamma")
   .subset2(x, name)
 }
 
-# Helper interno para validar x y p (y normalizar p si no suma 1)
-validate_x_p <- function(x, p) {
+# Helper interno para validar x y p (y reescalar p si rescale_p = TRUE, como
+# chisq.test(): mismo valor por defecto y misma tolerancia)
+validate_x_p <- function(x, p, rescale_p = FALSE) {
   if (!is.numeric(x) || length(x) < 1L) stop("'x' must be a numeric vector of counts.")
   if (!is.numeric(p)) stop("'p' must be a numeric vector of probabilities.")
   if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
@@ -83,11 +84,13 @@ validate_x_p <- function(x, p) {
   if (any(abs(x - round(x)) > 1e-8)) stop("'x' must contain integer counts.")
   if (anyNA(p) || any(!is.finite(p))) stop("'p' must not contain NA, NaN or infinite values.")
   if (any(p <= 0)) stop("'p' must contain strictly positive probabilities.")
-  s <- sum(p)
-  if (abs(s - 1) > 1e-8) {
-    warning(sprintf("'p' does not sum to 1 (sum = %s); it has been normalized to p / sum(p).",
-                    format(s, digits = 8)))
-    p <- p / s
+  if (!is.logical(rescale_p) || length(rescale_p) != 1L || is.na(rescale_p)) {
+    stop("'rescale_p' must be TRUE or FALSE.")
+  }
+  if (rescale_p) p <- p / sum(p)
+  if (abs(sum(p) - 1) > sqrt(.Machine$double.eps)) {
+    stop(sprintf("'p' must sum to 1 (sum = %s); use rescale_p = TRUE to rescale it to p / sum(p).",
+                 format(sum(p), digits = 8)))
   }
   list(x = round(x), p = p)
 }
@@ -109,7 +112,7 @@ resolve_stat_lambda <- function(stat, lambda = NULL) {
     stat_label <- "Probability Mass Function"
   } else { # "pd"
     if (is.null(lambda)) {
-      stop('\'lambda\' must be given when stat = "pd" (e.g. lambda = 2/3, as recommended by Cressie and Read).')
+      stop('\'lambda\' must be given when stat = "pd" (e.g. lambda = 2/3).')
     }
     if (length(lambda) != 1L || !is.numeric(lambda) || !is.finite(lambda)) {
       stop("'lambda' must be a single finite real number.")
@@ -137,8 +140,8 @@ resolve_n_threads <- function(n_threads) {
 
 #' Multinomial test p-value by Fourier series inversion
 #'
-#' Computes the p-value of a multinomial goodness-of-fit test,
-#' \deqn{p = P\{T(Y) \ge T(x)\}, \qquad Y \sim \mathrm{Multinomial}(N, p), \quad N = \sum_k x_k,}
+#' Computes the \pvalue{} of a multinomial goodness-of-fit test,
+#' \deqn{p = P\{T(Y) \ge T(x)\}, \qquad Y \sim \mathrm{Multinomial}(N, p), \quad N = \sum_k x_k,}{p = P{T(Y) >= T(x)},   Y ~ Multinomial(N, p),   N = sum_k x_k,}
 #' for an additive test statistic \eqn{T}, by summing a truncated Fourier series
 #' whose terms are values of the moment-generating function of the statistic.
 #' The series is truncated by an adaptive stopping rule, so the result is an
@@ -148,25 +151,30 @@ resolve_n_threads <- function(n_threads) {
 #' @param x Vector of observed counts, one per category (non-negative integers,
 #'   without missing values). Their sum is the number of trials \eqn{N}.
 #' @param p Vector of category probabilities under the null hypothesis, all
-#'   strictly positive. If they do not sum to 1 they are normalized to
-#'   \code{p / sum(p)}, with a warning; the normalized vector is the one stored
-#'   in the result. Default: equiprobable categories.
+#'   strictly positive. They must sum to 1 (up to a tolerance of
+#'   \code{sqrt(.Machine$double.eps)}), unless \code{rescale_p = TRUE}.
+#'   Default: equiprobable categories.
 #' @param stat Test statistic: \code{"llr"} (log-likelihood ratio \eqn{G^2}, the
-#'   default), \code{"chi2"} (Pearson's \eqn{X^2}), \code{"pd"} (Cressie--Read
-#'   power divergence with parameter \code{lambda}) or \code{"pmf"} (exact
-#'   multinomial test, which orders outcomes by their probability). See Details.
+#'   default), \code{"chi2"} (Pearson's \eqn{\mathcal{X}^2}{X^2}), \code{"pd"}
+#'   (Cressie--Read power divergence with parameter \code{lambda}) or
+#'   \code{"pmf"} (probability mass function of the multinomial, i.e. the exact
+#'   multinomial test). See Details.
 #' @param lambda Parameter \eqn{\lambda} of the power-divergence statistic; used
 #'   only when \code{stat = "pd"}, and then required (there is no default);
-#'   a warning is issued if it is given for another statistic. Cressie and Read
-#'   (1984) recommend \eqn{\lambda = 2/3}. \eqn{\lambda = -1} is not supported.
+#'   a warning is issued if it is given for another statistic.
+#' @param rescale_p Logical; if \code{TRUE}, \code{p} is rescaled to
+#'   \code{p / sum(p)}, so it can be given as any vector of positive weights. If
+#'   \code{FALSE} (default) and \code{p} does not sum to 1, an error is given.
+#'   Same argument and default as \code{rescale.p} in
+#'   \code{\link[stats]{chisq.test}}.
 #' @param undersampling Positive factor dividing the half-width \eqn{W} of the
 #'   Fourier period. The default 1 uses the smallest \eqn{W} for which the series
 #'   is exact. Values below 1 enlarge \eqn{W} (still exact, but more terms are
 #'   needed); values above 1 shrink \eqn{W} below that minimum, so the series
 #'   converges to a wrong value (aliasing). Intended for experimentation only.
-#' @param rel_eps Relative tolerance of the stopping rule (\eqn{\ge 0}). Default
+#' @param rel_eps Relative tolerance of the stopping rule (\eqn{\ge 0}{>= 0}). Default
 #'   0.001. It controls how stable the partial sums must be before the series is
-#'   truncated; it is \emph{not} a bound on the error of the returned p-value.
+#'   truncated; it is \emph{not} a bound on the error of the returned \pvalue{}.
 #' @param B Non-negative integer used by the term-size stopping rule: the series
 #'   stops after \code{B} consecutive terms each smaller, relative to the partial
 #'   sum, than \code{rel_eps / B}. Default 50; \code{B = 0} uses an internal value.
@@ -201,19 +209,22 @@ resolve_n_threads <- function(n_threads) {
 #'
 #' @details
 #' \strong{Statistics.} All supported statistics are additive,
-#' \eqn{T(y) = \sum_k f_k(y_k)}, which is what the method requires. With
+#' \eqn{T(y) = \sum_k f_k(y_k)}{T(y) = sum_k f_k(y_k)}, which is what the method requires. With
 #' \eqn{E_k = N p_k}:
 #' \itemize{
-#'   \item \code{"llr"}: \eqn{G^2 = 2 \sum_k y_k \log(y_k / E_k)}.
-#'   \item \code{"chi2"}: \eqn{X^2 = \sum_k (y_k - E_k)^2 / E_k}.
-#'   \item \code{"pd"}: \eqn{2 I^\lambda = \frac{2}{\lambda(\lambda+1)} \sum_k y_k [(y_k/E_k)^\lambda - 1]}
-#'     (Cressie and Read, 1984); \eqn{\lambda \to 0} gives \eqn{G^2} and
-#'     \eqn{\lambda = 1} gives \eqn{X^2}.
-#'   \item \code{"pmf"}: the p-value is \eqn{P\{P(Y) \le P(x)\}}, the total
-#'     probability of the outcomes that are at most as likely as the observed one.
+#'   \item \code{"llr"}: \eqn{G^2 = 2 \sum_k y_k \log(y_k / E_k)}{G^2 = 2 sum_k y_k log(y_k / E_k)}.
+#'   \item \code{"chi2"}: \eqn{\mathcal{X}^2 = \sum_k (y_k - E_k)^2 / E_k}{X^2 = sum_k (y_k - E_k)^2 / E_k}.
+#'   \item \code{"pd"}: \eqn{2 I^\lambda = \frac{2}{\lambda(\lambda+1)} \sum_k y_k [(y_k/E_k)^\lambda - 1]}{2 I^lambda = 2 / (lambda (lambda + 1)) sum_k y_k [(y_k / E_k)^lambda - 1]}
+#'     (Cressie and Read, 1984); \eqn{\lambda \to 0}{lambda -> 0} gives \eqn{G^2} and
+#'     \eqn{\lambda = 1} gives \eqn{\mathcal{X}^2}{X^2}.
+#'   \item \code{"pmf"}: the probability mass function \eqn{P(y)} of the
+#'     multinomial under the null hypothesis (exact multinomial test). Small
+#'     values are the extreme ones, so the \pvalue{} is \eqn{P\{P(Y) \le P(x)\}}{P{P(Y) <= P(x)}},
+#'     the total probability of the outcomes that are at most as likely as the
+#'     observed one.
 #' }
 #'
-#' \strong{Which statistics converge.} The p-value is written exactly as a Fourier
+#' \strong{Which statistics converge.} The \pvalue{} is written exactly as a Fourier
 #' series for every additive statistic, but the number of terms needed for a given
 #' accuracy depends on the statistic. For \code{"llr"} and \code{"pmf"} the series
 #' typically converges in a few hundred to a few thousand terms. For \code{"chi2"},
@@ -229,9 +240,9 @@ resolve_n_threads <- function(n_threads) {
 #' series stops as soon as either (i) \code{B} consecutive terms are each smaller
 #' than \code{rel_eps / B} relative to the partial sum, or (ii) the smoothed
 #' extrapolated values vary by at most a relative \code{rel_eps} over a trailing
-#' window covering the last half of the terms. The reported p-value is the last
+#' window covering the last half of the terms. The reported \pvalue{} is the last
 #' smoothed extrapolated value. With \code{engine = "standard"} only rule (i) is
-#' used and the reported p-value is the last partial sum.
+#' used and the reported \pvalue{} is the last partial sum.
 #'
 #' \strong{Engines.} \code{"speedup"} evaluates the terms with a Poissonized
 #' Cauchy-integral evaluator, chooses the exponential tilt \code{gamma} by a
@@ -244,8 +255,8 @@ resolve_n_threads <- function(n_threads) {
 #' @return An object of class \code{"multfourier"}: a list with components
 #' \describe{
 #'   \item{x, p}{The input counts and null probabilities (\code{p} after
-#'     normalization, if it did not sum to 1).}
-#'   \item{pval}{The computed p-value.}
+#'     rescaling, if \code{rescale_p = TRUE}).}
+#'   \item{pval}{The computed \pvalue{}.}
 #'   \item{stat}{Name of the test statistic, e.g. \code{"Log-Likelihood Ratio"}
 #'     or \code{"power-divergence (lambda = 0.6667)"}.}
 #'   \item{method}{\code{"fourier"}.}
@@ -254,8 +265,8 @@ resolve_n_threads <- function(n_threads) {
 #'     that the series terms stay within floating-point range (a saddlepoint
 #'     choice).}
 #'   \item{time_gamma}{Time in seconds spent choosing \code{gamma}.}
-#'   \item{W}{Half-width of the Fourier period, \eqn{\max(s_{\max}, -s_{\min})}
-#'     over the range \eqn{[s_{\min}, s_{\max}]} of the statistic minus its
+#'   \item{W}{Half-width of the Fourier period, \eqn{\max(s_{\max}, -s_{\min})}{max(s_max, -s_min)}
+#'     over the range \eqn{[s_{\min}, s_{\max}]}{[s_min, s_max]} of the statistic minus its
 #'     observed value, divided by \code{undersampling}.}
 #'   \item{n_terms}{Number of series terms summed.}
 #'   \item{status}{\code{0}: the stopping rule was met (the message reads
@@ -278,39 +289,47 @@ resolve_n_threads <- function(n_threads) {
 #'     the first one; values near 1 mean the terms are not decaying (a lattice-like
 #'     statistic).}
 #' }
-#' The last four components are diagnostics of the series; they are heuristics,
+#' The last four components (\code{err_rel_ext}, \code{err_rel_est},
+#' \code{n_eff} and \code{nu_max_ratio}) are diagnostics of the series; they are heuristics,
 #' not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
 #' versions still work, with a deprecation warning.
 #'
 #' @references
-#' Subiabre, F. and Thraves, C. Efficient computation of p-values for multinomial
+#' Subiabre, F. and Thraves, C. Efficient computation of \pvalue{}s for multinomial
 #' tests. Manuscript.
 #'
 #' Cressie, N. and Read, T. R. C. (1984). Multinomial goodness-of-fit tests.
 #' \emph{Journal of the Royal Statistical Society, Series B}, 46(3), 440--464.
 #'
-#' @seealso \code{\link{pval_exact}} for the exact p-value,
+#' @seealso \code{\link{pval_exact}} for the exact \pvalue{},
 #'   \code{\link{pval_flexible}} to choose between the two automatically.
 #'
 #' @examples
 #' p <- c(0.1, 0.2, 0.3, 0.4)
 #' x <- c(35, 30, 60, 75)   # N = 200
 #'
+#' # Log-likelihood ratio
 #' fit <- pval_fourier(x, p, stat = "llr")
 #' fit
-#' fit$pval
+#' fit$pval                 # 0.00688
 #' fit$status               # 0: stopping rule met
+#' fit$n_terms              # 1208
 #'
-#' # Compare with the exact p-value
-#' pval_exact(x, p, stat = "llr")$pval
+#' # Probability mass function (exact multinomial test)
+#' fit_pmf <- pval_fourier(x, p, stat = "pmf")
+#' fit_pmf$pval             # 0.00577
+#' fit_pmf$status           # 0: stopping rule met
 #'
-#' # Power divergence with the Cressie-Read parameter
-#' pval_fourier(x, p, stat = "pd", lambda = 2/3)$pval
+#' # Power divergence: lambda is required
+#' fit_pd <- pval_fourier(x, p, stat = "pd", lambda = 2/3)
+#' fit_pd$pval              # 0.00384
+#' fit_pd$status            # 0: stopping rule met
 #' @export
 pval_fourier <- function(x,
                          p = rep(1/length(x), length(x)),
                          stat = c("llr", "pd", "chi2", "pmf"),
                          lambda = NULL,
+                         rescale_p = FALSE,
                          undersampling = 1,
                          rel_eps = 0.001,
                          B = 50,
@@ -324,7 +343,7 @@ pval_fourier <- function(x,
                          engine = c("speedup", "standard"),
                          verbose = FALSE,
                          ...) {
-  xp <- validate_x_p(x, p)
+  xp <- validate_x_p(x, p, rescale_p)
   x <- xp$x
   p <- xp$p
   if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
@@ -367,8 +386,8 @@ pval_fourier <- function(x,
 
 #' Exact multinomial test p-value
 #'
-#' Computes the exact p-value \eqn{P\{T(Y) \ge T(x)\}},
-#' \eqn{Y \sim \mathrm{Multinomial}(N, p)}, of a multinomial goodness-of-fit
+#' Computes the exact \pvalue{} \eqn{P\{T(Y) \ge T(x)\}}{P{T(Y) >= T(x)}},
+#' \eqn{Y \sim \mathrm{Multinomial}(N, p)}{Y ~ Multinomial(N, p)}, of a multinomial goodness-of-fit
 #' test, up to floating-point rounding. Instead of enumerating the support, it
 #' prunes whole groups of outcomes using bounds on the statistic (see Details).
 #' \code{pval_exhaustive()} is a deprecated alias.
@@ -402,36 +421,61 @@ pval_fourier <- function(x,
 #'
 #' The cost still grows quickly with the number of categories \eqn{K}. As a rough
 #' guide, in our tests with the log-likelihood ratio on 8 threads, instances with
-#' \eqn{K \le 6} and \eqn{N \le 1000} took under five minutes, while \eqn{K \ge 8}
-#' with \eqn{N \ge 500} did not finish within an hour. For large instances use
+#' \eqn{K \le 6}{K <= 6} and \eqn{N \le 1000}{N <= 1000} took under five minutes, while \eqn{K \ge 8}{K >= 8}
+#' with \eqn{N \ge 500}{N >= 500} did not finish within an hour. For large instances use
 #' \code{\link{pval_fourier}}.
 #'
-#' @return An object of class \code{"multfourier"}, as described in
-#' \code{\link{pval_fourier}}, with \code{method = "exact"}. The Fourier-specific
-#' components (\code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms} and the
-#' four diagnostics) are \code{NA}. \code{status} is 0 when the computation finished and 1 when
-#' \code{max_time} was reached.
+#' @return An object of class \code{"multfourier"}: a list with components
+#' \describe{
+#'   \item{x, p}{The input counts and null probabilities (\code{p} after
+#'     rescaling, if \code{rescale_p = TRUE}).}
+#'   \item{pval}{The exact \pvalue{}, up to floating-point rounding; \code{NA} if
+#'     \code{max_time} was reached.}
+#'   \item{stat}{Name of the test statistic, e.g. \code{"Log-Likelihood Ratio"}
+#'     or \code{"power-divergence (lambda = 0.6667)"}.}
+#'   \item{method}{\code{"exact"}.}
+#'   \item{status}{\code{0}: the computation finished; \code{1}:
+#'     \code{max_time} was reached before it finished.}
+#'   \item{message}{Human-readable version of \code{status}. For \code{status = 0}
+#'     it reads \code{"Converged"}, a label shared with \code{\link{pval_fourier}}.}
+#'   \item{time}{Total wall-clock time in seconds.}
+#' }
+#' The components that describe the Fourier series are also present, so that
+#' results of both methods have the same structure, but are always \code{NA}:
+#' \code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms}, \code{err_rel_ext},
+#' \code{err_rel_est}, \code{n_eff} and \code{nu_max_ratio}.
 #'
 #' @seealso \code{\link{pval_fourier}}, \code{\link{pval_flexible}}.
 #'
 #' @examples
 #' p <- c(0.1, 0.2, 0.3, 0.4)
-#' x <- c(35, 30, 60, 75)
+#' x <- c(35, 30, 60, 75)   # N = 200
 #'
-#' pval_exact(x, p, stat = "llr")
-#' pval_exact(x, p, stat = "chi2")$pval
-#' pval_exact(x, p, stat = "pmf")$pval
+#' # Log-likelihood ratio
+#' fit <- pval_exact(x, p, stat = "llr")
+#' fit
+#' fit$pval                 # 0.00684
+#' fit$status               # 0: computation finished
+#'
+#' # Probability mass function (exact multinomial test)
+#' fit_pmf <- pval_exact(x, p, stat = "pmf")
+#' fit_pmf$pval             # 0.00578
+#'
+#' # Pearson's chi-square
+#' fit_chi2 <- pval_exact(x, p, stat = "chi2")
+#' fit_chi2$pval            # 0.00294
 #' @export
 pval_exact <- function(x,
                        p = rep(1/length(x), length(x)),
                        stat = c("llr", "pd", "chi2", "pmf"),
                        lambda = NULL,
+                       rescale_p = FALSE,
                        n_threads = min(2L, parallel::detectCores()),
                        max_time = NULL,
                        engine = c("speedup", "standard"),
                        verbose = FALSE,
                        ...) {
-  xp <- validate_x_p(x, p)
+  xp <- validate_x_p(x, p, rescale_p)
   x <- xp$x
   p <- xp$p
 
@@ -467,11 +511,11 @@ pval_exhaustive <- function(...) {
 
 #' Multinomial test p-value, choosing the method automatically
 #'
-#' Computes the p-value with \code{\link{pval_exact}} when the instance is small
+#' Computes the \pvalue{} with \code{\link{pval_exact}} when the instance is small
 #' and with \code{\link{pval_fourier}} otherwise.
 #'
 #' @inheritParams pval_fourier
-#' @param enum_cutoff Threshold on \eqn{\log_{10}} of the support size
+#' @param enum_cutoff Threshold on \eqn{\log_{10}}{log10} of the support size
 #'   \eqn{{N+K-1 \choose K-1}}{choose(N+K-1, K-1)} (the number of possible count vectors). Below it the
 #'   exact method is used, at or above it the Fourier method. Default 10. See
 #'   Details.
@@ -484,11 +528,11 @@ pval_exhaustive <- function(...) {
 #' @details
 #' The cost of \code{\link{pval_exact}} depends strongly on the observed counts,
 #' not only on the support size, and it is highest far in the tail, where small
-#' p-values are computed. With counts drawn from the null hypothesis it takes
-#' about one second on 2 threads at a support of \eqn{10^{12}} to \eqn{10^{13}}
+#' \pvalue{}s are computed. With counts drawn from the null hypothesis it takes
+#' about one second on 2 threads at a support of \eqn{10^{12}}{10^12} to \eqn{10^{13}}{10^13}
 #' outcomes (log-likelihood ratio, \eqn{K = 5, 6, 7}); with counts far in the
-#' tail it can take tens of seconds at a support of \eqn{10^{11}} (for example
-#' \eqn{K = 6}, \eqn{N = 400}, \eqn{p \approx 10^{-33}}). The default
+#' tail it can take tens of seconds at a support of \eqn{10^{11}}{10^11} (for example
+#' \eqn{K = 6}, \eqn{N = 400}, \eqn{p \approx 10^{-33}}{p ~ 10^-33}). The default
 #' \code{enum_cutoff = 10} is a simple, conservative value that keeps the exact
 #' method for instances where it is fast in both situations.
 #'
@@ -503,18 +547,27 @@ pval_exhaustive <- function(...) {
 #' @seealso \code{\link{pval_fourier}}, \code{\link{pval_exact}}.
 #'
 #' @examples
-#' # Small instance (K = 4, N = 200): exact method
-#' pval_flexible(c(35, 30, 60, 75), c(0.1, 0.2, 0.3, 0.4))$method
+#' # Small instance (K = 4, N = 200, about 10^6 outcomes): exact method
+#' p <- c(0.1, 0.2, 0.3, 0.4)
+#' x <- c(35, 30, 60, 75)
+#' fit <- pval_flexible(x, p, stat = "llr")
+#' fit
+#' fit$method               # "exact"
+#' fit$pval                 # 0.00684
+#' fit$status               # 0: computation finished
 #'
 #' # Large instance (K = 8, N = 2000, about 10^19 outcomes): Fourier method
-#' fit <- pval_flexible(c(240, 260, 250, 270, 230, 250, 245, 255))
-#' fit$method
-#' fit$status
+#' x_large <- c(240, 260, 250, 270, 230, 250, 245, 255)
+#' fit_large <- pval_flexible(x_large, stat = "llr")
+#' fit_large$method         # "fourier"
+#' fit_large$pval           # 0.761
+#' fit_large$status         # 0: stopping rule met
 #' @export
 pval_flexible <- function(x,
                           p = rep(1/length(x), length(x)),
                           stat = c("llr", "pd", "chi2", "pmf"),
                           lambda = NULL,
+                          rescale_p = FALSE,
                           enum_cutoff = 10,
                           undersampling = 1,
                           rel_eps = 0.001,
@@ -529,7 +582,7 @@ pval_flexible <- function(x,
                           engine = c("speedup", "standard"),
                           verbose = FALSE,
                           ...) {
-  xp <- validate_x_p(x, p)
+  xp <- validate_x_p(x, p, rescale_p)
   x <- xp$x
   p <- xp$p
   if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
@@ -573,8 +626,9 @@ pval_flexible <- function(x,
 
 #' Print method for multfourier objects
 #'
-#' Prints the method, statistic, p-value, status and, for the Fourier method, the
-#' tilt, period half-width and number of terms.
+#' Prints the method, statistic, \pvalue{}, status and total runtime and, for the
+#' Fourier method, also the tilt \code{gamma}, the time spent choosing it, the
+#' period half-width \code{W} and the number of terms.
 #'
 #' @param x Object of class \code{"multfourier"} returned by
 #'   \code{\link{pval_fourier}}, \code{\link{pval_exact}} or
@@ -582,6 +636,18 @@ pval_flexible <- function(x,
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return Invisibly returns \code{x}.
+#'
+#' @examples
+#' p <- c(0.1, 0.2, 0.3, 0.4)
+#' x <- c(35, 30, 60, 75)
+#'
+#' # Fourier method: also shows gamma, W and the number of terms
+#' fit_fourier <- pval_fourier(x, p, stat = "llr")
+#' fit_fourier              # same as print(fit_fourier)
+#'
+#' # Exact method
+#' fit_exact <- pval_exact(x, p, stat = "llr")
+#' fit_exact
 #' @export
 print.multfourier <- function(x, ...) {
   cat("Multinomial Test (MultFourier)\n")

@@ -10,6 +10,7 @@ pval_exact(
   p = rep(1/length(x), length(x)),
   stat = c("llr", "pd", "chi2", "pmf"),
   lambda = NULL,
+  rescale_p = FALSE,
   n_threads = min(2L, parallel::detectCores()),
   max_time = NULL,
   engine = c("speedup", "standard"),
@@ -24,19 +25,25 @@ pval_exhaustive(...)
 without missing values). Their sum is the number of trials \eqn{N}.}
 
 \item{p}{Vector of category probabilities under the null hypothesis, all
-strictly positive. If they do not sum to 1 they are normalized to
-\code{p / sum(p)}, with a warning; the normalized vector is the one stored
-in the result. Default: equiprobable categories.}
+strictly positive. They must sum to 1 (up to a tolerance of
+\code{sqrt(.Machine$double.eps)}), unless \code{rescale_p = TRUE}.
+Default: equiprobable categories.}
 
 \item{stat}{Test statistic: \code{"llr"} (log-likelihood ratio \eqn{G^2}, the
-default), \code{"chi2"} (Pearson's \eqn{X^2}), \code{"pd"} (Cressie--Read
-power divergence with parameter \code{lambda}) or \code{"pmf"} (exact
-multinomial test, which orders outcomes by their probability). See Details.}
+default), \code{"chi2"} (Pearson's \eqn{\mathcal{X}^2}{X^2}), \code{"pd"}
+(Cressie--Read power divergence with parameter \code{lambda}) or
+\code{"pmf"} (probability mass function of the multinomial, i.e. the exact
+multinomial test). See Details.}
 
 \item{lambda}{Parameter \eqn{\lambda} of the power-divergence statistic; used
 only when \code{stat = "pd"}, and then required (there is no default);
-a warning is issued if it is given for another statistic. Cressie and Read
-(1984) recommend \eqn{\lambda = 2/3}. \eqn{\lambda = -1} is not supported.}
+a warning is issued if it is given for another statistic.}
+
+\item{rescale_p}{Logical; if \code{TRUE}, \code{p} is rescaled to
+\code{p / sum(p)}, so it can be given as any vector of positive weights. If
+\code{FALSE} (default) and \code{p} does not sum to 1, an error is given.
+Same argument and default as \code{rescale.p} in
+\code{\link[stats]{chisq.test}}.}
 
 \item{n_threads}{Number of threads (positive integer, capped at the number of
 available cores). Default \code{min(2L, parallel::detectCores())}.}
@@ -58,15 +65,29 @@ two by bisection.}
 warning.}
 }
 \value{
-An object of class \code{"multfourier"}, as described in
-\code{\link{pval_fourier}}, with \code{method = "exact"}. The Fourier-specific
-components (\code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms} and the
-four diagnostics) are \code{NA}. \code{status} is 0 when the computation finished and 1 when
-\code{max_time} was reached.
+An object of class \code{"multfourier"}: a list with components
+\describe{
+  \item{x, p}{The input counts and null probabilities (\code{p} after
+    rescaling, if \code{rescale_p = TRUE}).}
+  \item{pval}{The exact \pvalue{}, up to floating-point rounding; \code{NA} if
+    \code{max_time} was reached.}
+  \item{stat}{Name of the test statistic, e.g. \code{"Log-Likelihood Ratio"}
+    or \code{"power-divergence (lambda = 0.6667)"}.}
+  \item{method}{\code{"exact"}.}
+  \item{status}{\code{0}: the computation finished; \code{1}:
+    \code{max_time} was reached before it finished.}
+  \item{message}{Human-readable version of \code{status}. For \code{status = 0}
+    it reads \code{"Converged"}, a label shared with \code{\link{pval_fourier}}.}
+  \item{time}{Total wall-clock time in seconds.}
+}
+The components that describe the Fourier series are also present, so that
+results of both methods have the same structure, but are always \code{NA}:
+\code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms}, \code{err_rel_ext},
+\code{err_rel_est}, \code{n_eff} and \code{nu_max_ratio}.
 }
 \description{
-Computes the exact p-value \eqn{P\{T(Y) \ge T(x)\}},
-\eqn{Y \sim \mathrm{Multinomial}(N, p)}, of a multinomial goodness-of-fit
+Computes the exact \pvalue{} \eqn{P\{T(Y) \ge T(x)\}}{P{T(Y) >= T(x)}},
+\eqn{Y \sim \mathrm{Multinomial}(N, p)}{Y ~ Multinomial(N, p)}, of a multinomial goodness-of-fit
 test, up to floating-point rounding. Instead of enumerating the support, it
 prunes whole groups of outcomes using bounds on the statistic (see Details).
 \code{pval_exhaustive()} is a deprecated alias.
@@ -84,17 +105,27 @@ discarded) without visiting it. Only partial assignments near the boundary
 
 The cost still grows quickly with the number of categories \eqn{K}. As a rough
 guide, in our tests with the log-likelihood ratio on 8 threads, instances with
-\eqn{K \le 6} and \eqn{N \le 1000} took under five minutes, while \eqn{K \ge 8}
-with \eqn{N \ge 500} did not finish within an hour. For large instances use
+\eqn{K \le 6}{K <= 6} and \eqn{N \le 1000}{N <= 1000} took under five minutes, while \eqn{K \ge 8}{K >= 8}
+with \eqn{N \ge 500}{N >= 500} did not finish within an hour. For large instances use
 \code{\link{pval_fourier}}.
 }
 \examples{
 p <- c(0.1, 0.2, 0.3, 0.4)
-x <- c(35, 30, 60, 75)
+x <- c(35, 30, 60, 75)   # N = 200
 
-pval_exact(x, p, stat = "llr")
-pval_exact(x, p, stat = "chi2")$pval
-pval_exact(x, p, stat = "pmf")$pval
+# Log-likelihood ratio
+fit <- pval_exact(x, p, stat = "llr")
+fit
+fit$pval                 # 0.00684
+fit$status               # 0: computation finished
+
+# Probability mass function (exact multinomial test)
+fit_pmf <- pval_exact(x, p, stat = "pmf")
+fit_pmf$pval             # 0.00578
+
+# Pearson's chi-square
+fit_chi2 <- pval_exact(x, p, stat = "chi2")
+fit_chi2$pval            # 0.00294
 }
 \seealso{
 \code{\link{pval_fourier}}, \code{\link{pval_flexible}}.

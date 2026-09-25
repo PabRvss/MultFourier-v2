@@ -49,6 +49,13 @@ fit_fl <- pval_flexible(x_small, p_small)
 fit_bad <- tryCatch(pval_fourier(x, p, stat = "pd", lambda = -1), error = function(e) conditionMessage(e))
 print(fit_bad)
 
+# 9b. p que no suma 1: error por defecto; con rescale_p = TRUE se reescala (como chisq.test)
+err_p <- tryCatch(pval_exact(x_small, c(3, 3, 4)), error = function(e) conditionMessage(e))
+print(err_p)
+stopifnot(grepl("must sum to 1", err_p))
+fit_resc <- pval_exact(x_small, c(3, 3, 4), rescale_p = TRUE)
+stopifnot(isTRUE(all.equal(fit_resc$pval, fit_ex$pval)), isTRUE(all.equal(fit_resc$p, p_small)))
+
 # 10. Tests de la vignette (Escuela Centenario y leave-one-out)
 votes <- matrix(
   c(
