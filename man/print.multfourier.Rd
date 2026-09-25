@@ -7,13 +7,16 @@
 \method{print}{multfourier}(x, ...)
 }
 \arguments{
-\item{x}{Object of class \code{"multfourier"} returned by \code{pval_fourier}, \code{pval_exhaustive}, or \code{pval_flexible}.}
+\item{x}{Object of class \code{"multfourier"} returned by
+\code{\link{pval_fourier}}, \code{\link{pval_exact}} or
+\code{\link{pval_flexible}}.}
 
 \item{...}{Additional arguments (currently unused).}
 }
 \value{
-Invisibly returns the input object.
+Invisibly returns \code{x}.
 }
 \description{
-Print method for multfourier objects
+Prints the method, statistic, p-value, status and, for the Fourier method, the
+tilt, period half-width and number of terms.
 }

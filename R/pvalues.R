@@ -1,7 +1,7 @@
 # Helper interno para construir el objeto S3 multfourier
 build_multfourier_s3 <- function(raw, x, p, elapsed, requested_method, stat_label) {
   method_name <- if (requested_method == "flexible") {
-    if (!is.null(raw$method) && raw$method == 1L) "fourier" else "exhaustive"
+    if (!is.null(raw$method) && raw$method == 1L) "fourier" else "exact"
   } else {
     requested_method
   }
@@ -38,34 +38,64 @@ build_multfourier_s3 <- function(raw, x, p, elapsed, requested_method, stat_labe
     x = as.numeric(x),
     p = as.numeric(p),
     pval = as.numeric(raw$pval),
-    Time_gamma = time_gamma_val,
-    W = w_val,
     stat = as.character(stat_label),
-    Gamma = gamma_val,
-    n_terms = n_terms_val,
-    time = if (!is.null(raw$total_time) && raw$total_time > 0) as.numeric(raw$total_time) else as.numeric(elapsed),
+    method = as.character(method_name),
     status = as.integer(status_id),
     message = as.character(status_msg),
-    method = as.character(method_name)
+    time = if (!is.null(raw$total_time) && raw$total_time > 0) as.numeric(raw$total_time) else as.numeric(elapsed),
+    gamma = gamma_val,
+    time_gamma = time_gamma_val,
+    W = w_val,
+    n_terms = n_terms_val,
+    err_rel_ext = diag_val(raw$err_rel_ext),
+    err_rel_est = diag_val(raw$err_rel_est),
+    n_eff = diag_val(raw$n_eff),
+    nu_max_ratio = diag_val(raw$nu_max_ratio)
   )
-  
+
   class(out) <- "multfourier"
-  for (nm in names(out)) {
-    attr(out, nm) <- out[[nm]]
-  }
-  
-  if (!is.null(raw$err_rel_est)) attr(out, "err_rel_est") <- as.numeric(raw$err_rel_est)
-  if (!is.null(raw$err_rel_ext)) attr(out, "err_rel_ext") <- as.numeric(raw$err_rel_ext)
-  if (!is.null(raw$n_eff)) attr(out, "n_eff") <- as.numeric(raw$n_eff)
-  if (!is.null(raw$nu_max_ratio)) attr(out, "nu_max_ratio") <- as.numeric(raw$nu_max_ratio)
-  
   out
 }
 
+# Diagnosticos de la serie de Fourier: NA para el metodo exacto o si faltan
+diag_val <- function(v) if (is.null(v)) NA_real_ else as.numeric(v)
+
+# Nombres antiguos de componentes, aceptados con aviso (usar los nuevos)
+multfourier_old_names <- c(Gamma = "gamma", Time_gamma = "time_gamma")
+
+#' @export
+`$.multfourier` <- function(x, name) {
+  if (name %in% names(multfourier_old_names)) {
+    new <- multfourier_old_names[[name]]
+    warning(sprintf("'%s' is deprecated; use '%s' instead.", name, new), call. = FALSE)
+    name <- new
+  }
+  .subset2(x, name)
+}
+
+# Helper interno para validar x y p (y normalizar p si no suma 1)
+validate_x_p <- function(x, p) {
+  if (!is.numeric(x) || length(x) < 1L) stop("'x' must be a numeric vector of counts.")
+  if (!is.numeric(p)) stop("'p' must be a numeric vector of probabilities.")
+  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
+  if (anyNA(x) || any(!is.finite(x))) stop("'x' must not contain NA, NaN or infinite values.")
+  if (any(x < 0)) stop("'x' must contain non-negative counts.")
+  if (any(abs(x - round(x)) > 1e-8)) stop("'x' must contain integer counts.")
+  if (anyNA(p) || any(!is.finite(p))) stop("'p' must not contain NA, NaN or infinite values.")
+  if (any(p <= 0)) stop("'p' must contain strictly positive probabilities.")
+  s <- sum(p)
+  if (abs(s - 1) > 1e-8) {
+    warning(sprintf("'p' does not sum to 1 (sum = %s); it has been normalized to p / sum(p).",
+                    format(s, digits = 8)))
+    p <- p / s
+  }
+  list(x = round(x), p = p)
+}
+
 # Helper interno para resolver y validar el estadistico y lambda
-resolve_stat_lambda <- function(stat, lambda, has_lambda = FALSE) {
+resolve_stat_lambda <- function(stat, lambda = NULL) {
   stat <- match.arg(stat, c("llr", "pd", "chi2", "pmf"))
-  if (has_lambda && stat != "pd") {
+  if (!is.null(lambda) && stat != "pd") {
     warning('Parameter lambda is ignored since stat is not "pd"')
   }
   if (stat == "chi2") {
@@ -78,8 +108,14 @@ resolve_stat_lambda <- function(stat, lambda, has_lambda = FALSE) {
     lambda_val <- NaN
     stat_label <- "Probability Mass Function"
   } else { # "pd"
+    if (is.null(lambda)) {
+      stop('\'lambda\' must be given when stat = "pd" (e.g. lambda = 2/3, as recommended by Cressie and Read).')
+    }
     if (length(lambda) != 1L || !is.numeric(lambda) || !is.finite(lambda)) {
       stop("'lambda' must be a single finite real number.")
+    }
+    if (abs(lambda + 1) < 1e-8) {
+      stop("'lambda = -1' is not supported; use a value different from -1.")
     }
     lambda_val <- as.numeric(lambda)
     stat_label <- sprintf("power-divergence (lambda = %s)", format(lambda_val))
@@ -98,202 +134,186 @@ resolve_n_threads <- function(n_threads) {
   min(n_threads, max_cores)
 }
 
-#' Multinomial p-value computation via flexible method
+
+#' Multinomial test p-value by Fourier series inversion
 #'
-#' Evaluates whether the dimension of the multinomial support allows exact
-#' enumeration (iterative bisection) or routes to the Fourier inversion series method.
+#' Computes the p-value of a multinomial goodness-of-fit test,
+#' \deqn{p = P\{T(Y) \ge T(x)\}, \qquad Y \sim \mathrm{Multinomial}(N, p), \quad N = \sum_k x_k,}
+#' for an additive test statistic \eqn{T}, by summing a truncated Fourier series
+#' whose terms are values of the moment-generating function of the statistic.
+#' The series is truncated by an adaptive stopping rule, so the result is an
+#' approximation whose accuracy depends on the statistic and the instance; always
+#' check the returned \code{status}.
 #'
-#' @param x Numeric vector of observed counts for each category.
-#' @param p Numeric vector of theoretical probabilities under the null hypothesis (must sum to 1).
-#' @param stat Test statistic: \code{"llr"} (Log-Likelihood Ratio), \code{"pd"} (Power Divergence), \code{"chi2"} (Pearson's Chi-squared), or \code{"pmf"} (Multinomial Point Probability Mass). Default is \code{"llr"}.
-#' @param lambda Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.
-#' @param undersampling Undersampling factor (> 0) for the period in the Fourier series. Default is 1.
-#' @param rel_eps Relative convergence tolerance (>= 0). Default is 0.001.
-#' @param B Integer >= 0; number of consecutive terms within tolerance required for convergence. Default is 30.
-#' @param max_terms Maximum number of harmonic terms to evaluate in the series (positive integer). Default is 10000.
-#' @param max_time Maximum execution time in seconds (optional).
-#' @param avg_window Fraction of final partial sums to average (between 0 and 1). Default is 0.
-#' @param avg_flat Logical; if TRUE, uses a flat moving average; if FALSE, applies linear weighting towards the end. Default is FALSE.
-#' @param n_threads Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.
-#' @param precision Arithmetic precision: "double" (standard) or "double-double" (extended precision). Default is "double".
-#' @param precompute Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.
-#' @param engine Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms). Default is "speedup".
-#' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
-#' @param ... Additional internal parameters passed to the C engine (e.g. \code{enum_cutoff = 7.4}, the threshold for \eqn{\log_{10}} support size under which exact bisection is selected, corresponding to approximately 1 second of execution).
-#' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
-#' \describe{
-#'   \item{x}{The input vector of observed realizations for each category.}
-#'   \item{p}{The input vector of probabilities for each category under the null hypothesis.}
-#'   \item{pval}{The computed p-value.}
-#'   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
-#'   \item{W}{The effective width of the distribution support interval.}
-#'   \item{stat}{A string describing the test statistic used (e.g. \code{"Log-Likelihood Ratio"}, \code{"Pearson's Chi-Square"}, \code{"Probability Mass Function"}, or \code{"power-divergence (lambda = ...)"}).}
-#'   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
-#'   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
-#'   \item{time}{The total execution time of the algorithm in seconds.}
-#'   \item{status}{The final status ID of the algorithm upon completion:
-#'     \itemize{
-#'       \item \code{0}: Converged.
-#'       \item \code{1}: Maximum time reached.
-#'       \item \code{2}: Maximum number of terms reached.
-#'       \item \code{3}: Could not solve the optimization of gamma.
-#'       \item \code{4}: Numerical instability detected (magnitude explosion).
-#'     }
-#'   }
-#'   \item{message}{The finishing status displayed as a human-readable message.}
-#'   \item{method}{A string with value \code{"fourier"} or \code{"exhaustive"}.}
+#' @param x Vector of observed counts, one per category (non-negative integers,
+#'   without missing values). Their sum is the number of trials \eqn{N}.
+#' @param p Vector of category probabilities under the null hypothesis, all
+#'   strictly positive. If they do not sum to 1 they are normalized to
+#'   \code{p / sum(p)}, with a warning; the normalized vector is the one stored
+#'   in the result. Default: equiprobable categories.
+#' @param stat Test statistic: \code{"llr"} (log-likelihood ratio \eqn{G^2}, the
+#'   default), \code{"chi2"} (Pearson's \eqn{X^2}), \code{"pd"} (Cressie--Read
+#'   power divergence with parameter \code{lambda}) or \code{"pmf"} (exact
+#'   multinomial test, which orders outcomes by their probability). See Details.
+#' @param lambda Parameter \eqn{\lambda} of the power-divergence statistic; used
+#'   only when \code{stat = "pd"}, and then required (there is no default);
+#'   a warning is issued if it is given for another statistic. Cressie and Read
+#'   (1984) recommend \eqn{\lambda = 2/3}. \eqn{\lambda = -1} is not supported.
+#' @param undersampling Positive factor dividing the half-width \eqn{W} of the
+#'   Fourier period. The default 1 uses the smallest \eqn{W} for which the series
+#'   is exact. Values below 1 enlarge \eqn{W} (still exact, but more terms are
+#'   needed); values above 1 shrink \eqn{W} below that minimum, so the series
+#'   converges to a wrong value (aliasing). Intended for experimentation only.
+#' @param rel_eps Relative tolerance of the stopping rule (\eqn{\ge 0}). Default
+#'   0.001. It controls how stable the partial sums must be before the series is
+#'   truncated; it is \emph{not} a bound on the error of the returned p-value.
+#' @param B Non-negative integer used by the term-size stopping rule: the series
+#'   stops after \code{B} consecutive terms each smaller, relative to the partial
+#'   sum, than \code{rel_eps / B}. Default 50; \code{B = 0} uses an internal value.
+#' @param max_terms Maximum number of series terms (positive integer). Default
+#'   10000. If it is reached before the stopping rule is met, \code{status} is 2.
+#' @param max_time Optional time limit in seconds. \code{NULL} (default) means no
+#'   limit. When it is reached, \code{status} is 1.
+#' @param avg_window Fraction (between 0 and 1) of the last partial sums to
+#'   average into the reported value. Default 0 (no averaging). When positive, it
+#'   replaces the extrapolated value of \code{engine = "speedup"}; averaging is a
+#'   linear filter that can bias the result and is usually less accurate than the
+#'   default.
+#' @param avg_flat Logical; with \code{avg_window > 0}, \code{TRUE} gives equal
+#'   weights and \code{FALSE} (default) weights that grow linearly towards the
+#'   last partial sum.
+#' @param n_threads Number of threads used to evaluate the series terms (positive
+#'   integer, capped at the number of available cores). Default
+#'   \code{min(2L, parallel::detectCores())}.
+#' @param precision Floating-point precision of the term evaluator:
+#'   \code{"double"} (default) or \code{"double-double"}. Only used with
+#'   \code{engine = "standard"}; ignored by the default engine.
+#' @param precompute Logical; if \code{TRUE} (default), precomputes the FFT plan
+#'   of the term evaluator. Only used with \code{engine = "standard"}.
+#' @param engine \code{"speedup"} (default) or \code{"standard"}. See Details.
+#' @param verbose Logical; if \code{TRUE}, prints the partial sums and diagnostic
+#'   information while running. Default \code{FALSE}.
+#' @param ... Advanced options passed to the C engine, for example
+#'   \code{print_freq} (how often partial sums are printed when
+#'   \code{verbose = TRUE}; default 100) or \code{extrapolate} (0: no
+#'   extrapolation; 1: report the extrapolated value; 2: also stop on it, the
+#'   default of \code{engine = "speedup"}). Unknown names produce a warning.
+#'
+#' @details
+#' \strong{Statistics.} All supported statistics are additive,
+#' \eqn{T(y) = \sum_k f_k(y_k)}, which is what the method requires. With
+#' \eqn{E_k = N p_k}:
+#' \itemize{
+#'   \item \code{"llr"}: \eqn{G^2 = 2 \sum_k y_k \log(y_k / E_k)}.
+#'   \item \code{"chi2"}: \eqn{X^2 = \sum_k (y_k - E_k)^2 / E_k}.
+#'   \item \code{"pd"}: \eqn{2 I^\lambda = \frac{2}{\lambda(\lambda+1)} \sum_k y_k [(y_k/E_k)^\lambda - 1]}
+#'     (Cressie and Read, 1984); \eqn{\lambda \to 0} gives \eqn{G^2} and
+#'     \eqn{\lambda = 1} gives \eqn{X^2}.
+#'   \item \code{"pmf"}: the p-value is \eqn{P\{P(Y) \le P(x)\}}, the total
+#'     probability of the outcomes that are at most as likely as the observed one.
 #' }
-#' @useDynLib MultFourier, c_run_multfourier
-#' @export
-pval_flexible <- function(x,
-                          p = rep(1/length(x), length(x)),
-                          stat = c("llr", "pd", "chi2", "pmf"),
-                          lambda = 1,
-                          undersampling = 1,
-                          rel_eps = 0.001,
-                          B = 30,
-                          max_terms = 10000,
-                          max_time = NULL,
-                          avg_window = 0,
-                          avg_flat = FALSE,
-                          n_threads = min(2L, parallel::detectCores()),
-                          precision = c("double", "double-double"),
-                          precompute = TRUE,
-                          engine = c("speedup", "standard"),
-                          verbose = FALSE,
-                          ...) {
-  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
-  if (any(x < 0) || any(p <= 0)) stop("Counts must be non-negative and probabilities strictly positive.")
-  if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
-  if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
-  if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
-  if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
-  if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
-
-  st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
-  threads_val <- resolve_n_threads(n_threads)
-  precision <- match.arg(precision)
-  engine <- match.arg(engine)
-
-  opts <- list(
-    method = "flexible",
-    stat = st$stat,
-    lambda = st$lambda,
-    undersampling = as.numeric(undersampling),
-    avg_window = as.numeric(avg_window),
-    avg_flat = as.logical(avg_flat),
-    rel_eps = as.numeric(rel_eps),
-    max_terms = as.integer(max_terms),
-    B = as.integer(B),
-    n_threads = as.integer(threads_val),
-    precision = precision,
-    precompute = as.logical(precompute),
-    engine = engine,
-    speedup = (engine == "speedup"),
-    max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
-    verbose = as.logical(verbose),
-    ...
-  )
-
-  t0 <- proc.time()
-  raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
-  elapsed <- (proc.time() - t0)[["elapsed"]]
-
-  build_multfourier_s3(raw, x, p, elapsed, "flexible", st$label)
-}
-
-#' Exact multinomial p-value computation via iterative bisection
 #'
-#' @param x Numeric vector of observed counts for each category.
-#' @param p Numeric vector of theoretical probabilities under the null hypothesis.
-#' @param stat Test statistic: \code{"llr"}, \code{"pd"}, \code{"chi2"}, or \code{"pmf"}. Default is \code{"llr"}.
-#' @param lambda Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.
-#' @param n_threads Number of execution threads (integer >= 1). Default is 1.
-#' @param max_time Maximum execution time in seconds (optional).
-#' @param engine Computational engine: \code{"speedup"} (default, uses pruning bounds via \code{fast_exhaustive}) or \code{"standard"} (iterative bisection in last categories). Default is "speedup".
-#' @param verbose Logical; if TRUE, prints progress information. Default is FALSE.
-#' @param ... Additional internal parameters passed to the C engine.
-#' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
-#' \describe{
-#'   \item{x}{The input vector of observed realizations for each category.}
-#'   \item{p}{The input vector of probabilities for each category under the null hypothesis.}
-#'   \item{pval}{The computed p-value.}
-#'   \item{stat}{A string describing the test statistic used.}
-#'   \item{time}{The total execution time of the algorithm in seconds.}
-#'   \item{status}{The final status ID of the algorithm upon completion (\code{0}: Converged, \code{1}: Maximum time reached).}
-#'   \item{message}{The finishing status displayed as a human-readable message.}
-#'   \item{method}{A string with value \code{"exhaustive"}.}
-#' }
-#' @export
-pval_exhaustive <- function(x,
-                            p = rep(1/length(x), length(x)),
-                            stat = c("llr", "pd", "chi2", "pmf"),
-                            lambda = 1,
-                            n_threads = 1,
-                            max_time = NULL,
-                            engine = c("speedup", "standard"),
-                            verbose = FALSE,
-                            ...) {
-  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
-  if (any(x < 0) || any(p <= 0)) stop("Counts must be non-negative and probabilities strictly positive.")
-
-  st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
-  threads_val <- resolve_n_threads(n_threads)
-  engine <- match.arg(engine)
-
-  opts <- list(
-    method = "exhaustive",
-    stat = st$stat,
-    lambda = st$lambda,
-    n_threads = as.integer(threads_val),
-    engine = engine,
-    speedup = (engine == "speedup"),
-    max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
-    verbose = as.logical(verbose),
-    ...
-  )
-
-  t0 <- proc.time()
-  raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
-  elapsed <- (proc.time() - t0)[["elapsed"]]
-
-  build_multfourier_s3(raw, x, p, elapsed, "exhaustive", st$label)
-}
-
-#' Multinomial p-value computation via Fourier series inversion
+#' \strong{Which statistics converge.} The p-value is written exactly as a Fourier
+#' series for every additive statistic, but the number of terms needed for a given
+#' accuracy depends on the statistic. For \code{"llr"} and \code{"pmf"} the series
+#' typically converges in a few hundred to a few thousand terms. For \code{"chi2"},
+#' and often for \code{"pd"} unless \eqn{\lambda} is close to 0 (\eqn{\lambda = 2/3}
+#' has failed on real data), the values of the statistic lie on or near a
+#' lattice, the terms do not decay, and the series can fail to
+#' converge within \code{max_terms} (\code{status = 2}) or even return a negative
+#' value. In that case use \code{\link{pval_exact}} when it is feasible.
 #'
-#' @inheritParams pval_flexible
-#' @return Returns an S3 object of class \code{"multfourier"} with the following attributes:
+#' \strong{Stopping rule and reported value.} With \code{engine = "speedup"} the
+#' partial sums are accelerated with Wynn's epsilon algorithm (in the safeguarded
+#' form of QUADPACK's DQELG) and smoothed with a running median of five. The
+#' series stops as soon as either (i) \code{B} consecutive terms are each smaller
+#' than \code{rel_eps / B} relative to the partial sum, or (ii) the smoothed
+#' extrapolated values vary by at most a relative \code{rel_eps} over a trailing
+#' window covering the last half of the terms. The reported p-value is the last
+#' smoothed extrapolated value. With \code{engine = "standard"} only rule (i) is
+#' used and the reported p-value is the last partial sum.
+#'
+#' \strong{Engines.} \code{"speedup"} evaluates the terms with a Poissonized
+#' Cauchy-integral evaluator, chooses the exponential tilt \code{gamma} by a
+#' Newton saddlepoint search, computes the range of the statistic in closed form,
+#' and uses the extrapolation described above. \code{"standard"} is the earlier
+#' implementation: polynomial convolution evaluated by FFT, a grid search for the
+#' tilt, a dynamic program for the range, and no extrapolation. Both compute the
+#' same series.
+#'
+#' @return An object of class \code{"multfourier"}: a list with components
 #' \describe{
-#'   \item{x}{The input vector of observed realizations for each category.}
-#'   \item{p}{The input vector of probabilities for each category under the null hypothesis.}
+#'   \item{x, p}{The input counts and null probabilities (\code{p} after
+#'     normalization, if it did not sum to 1).}
 #'   \item{pval}{The computed p-value.}
-#'   \item{Time_gamma}{The time spent optimizing gamma in seconds.}
-#'   \item{W}{The effective width of the distribution support interval.}
-#'   \item{stat}{A string describing the test statistic used (e.g. \code{"Log-Likelihood Ratio"}, \code{"Pearson's Chi-Square"}, \code{"Probability Mass Function"}, or \code{"power-divergence (lambda = ...)"}).}
-#'   \item{Gamma}{The optimal gamma obtained in the first part of the method.}
-#'   \item{n_terms}{The number of terms of the Fourier sum evaluated.}
-#'   \item{time}{The total execution time of the algorithm in seconds.}
-#'   \item{status}{The final status ID of the algorithm upon completion:
-#'     \itemize{
-#'       \item \code{0}: Converged.
-#'       \item \code{1}: Maximum time reached.
-#'       \item \code{2}: Maximum number of terms reached.
-#'       \item \code{3}: Could not solve the optimization of gamma.
-#'       \item \code{4}: Numerical instability detected (magnitude explosion).
-#'     }
-#'   }
-#'   \item{message}{The finishing status displayed as a human-readable message.}
-#'   \item{method}{A string with value \code{"fourier"}.}
+#'   \item{stat}{Name of the test statistic, e.g. \code{"Log-Likelihood Ratio"}
+#'     or \code{"power-divergence (lambda = 0.6667)"}.}
+#'   \item{method}{\code{"fourier"}.}
+#'   \item{time}{Total wall-clock time in seconds.}
+#'   \item{gamma}{The exponential tilt \eqn{\gamma} applied to the statistic so
+#'     that the series terms stay within floating-point range (a saddlepoint
+#'     choice).}
+#'   \item{time_gamma}{Time in seconds spent choosing \code{gamma}.}
+#'   \item{W}{Half-width of the Fourier period, \eqn{\max(s_{\max}, -s_{\min})}
+#'     over the range \eqn{[s_{\min}, s_{\max}]} of the statistic minus its
+#'     observed value, divided by \code{undersampling}.}
+#'   \item{n_terms}{Number of series terms summed.}
+#'   \item{status}{\code{0}: the stopping rule was met (the message reads
+#'     \code{"Converged"}); \code{1}: \code{max_time} was reached; \code{2}:
+#'     \code{max_terms} was reached without meeting the stopping rule, so
+#'     \code{pval} is unreliable; \code{3}: the search for \code{gamma} failed;
+#'     \code{4}: numerical overflow in the evaluation of the terms. With a status
+#'     other than 0, \code{pval} is the last value reached or \code{NA}.}
+#'   \item{message}{Human-readable version of \code{status}.}
+#'   \item{err_rel_ext}{Relative spread of the smoothed extrapolated values over
+#'     the final window, i.e. the quantity that rule (ii) compares with
+#'     \code{rel_eps}. When the series stopped by rule (i) it can be larger
+#'     than \code{rel_eps}.}
+#'   \item{err_rel_est}{Estimate of the relative truncation error of the raw
+#'     partial sum (not of the extrapolated value that is reported), based on a
+#'     random-phase argument; in our tests it tends to underestimate the error.}
+#'   \item{n_eff}{Effective number of support points implied by the size of the
+#'     late terms; used by \code{err_rel_est}.}
+#'   \item{nu_max_ratio}{Largest size of the late transform values relative to
+#'     the first one; values near 1 mean the terms are not decaying (a lattice-like
+#'     statistic).}
 #' }
+#' The last four components are diagnostics of the series; they are heuristics,
+#' not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
+#' versions still work, with a deprecation warning.
+#'
+#' @references
+#' Subiabre, F. and Thraves, C. Efficient computation of p-values for multinomial
+#' tests. Manuscript.
+#'
+#' Cressie, N. and Read, T. R. C. (1984). Multinomial goodness-of-fit tests.
+#' \emph{Journal of the Royal Statistical Society, Series B}, 46(3), 440--464.
+#'
+#' @seealso \code{\link{pval_exact}} for the exact p-value,
+#'   \code{\link{pval_flexible}} to choose between the two automatically.
+#'
+#' @examples
+#' p <- c(0.1, 0.2, 0.3, 0.4)
+#' x <- c(35, 30, 60, 75)   # N = 200
+#'
+#' fit <- pval_fourier(x, p, stat = "llr")
+#' fit
+#' fit$pval
+#' fit$status               # 0: stopping rule met
+#'
+#' # Compare with the exact p-value
+#' pval_exact(x, p, stat = "llr")$pval
+#'
+#' # Power divergence with the Cressie-Read parameter
+#' pval_fourier(x, p, stat = "pd", lambda = 2/3)$pval
 #' @export
 pval_fourier <- function(x,
                          p = rep(1/length(x), length(x)),
                          stat = c("llr", "pd", "chi2", "pmf"),
-                         lambda = 1,
+                         lambda = NULL,
                          undersampling = 1,
                          rel_eps = 0.001,
-                         B = 30,
+                         B = 50,
                          max_terms = 10000,
                          max_time = NULL,
                          avg_window = 0,
@@ -304,15 +324,16 @@ pval_fourier <- function(x,
                          engine = c("speedup", "standard"),
                          verbose = FALSE,
                          ...) {
-  if (length(x) != length(p)) stop("'x' and 'p' must have the same length.")
-  if (any(x < 0) || any(p <= 0)) stop("Counts must be non-negative and probabilities strictly positive.")
+  xp <- validate_x_p(x, p)
+  x <- xp$x
+  p <- xp$p
   if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
   if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
   if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
   if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
   if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
 
-  st <- resolve_stat_lambda(stat, lambda, has_lambda = !missing(lambda))
+  st <- resolve_stat_lambda(stat, lambda)
   threads_val <- resolve_n_threads(n_threads)
   precision <- match.arg(precision)
   engine <- match.arg(engine)
@@ -344,12 +365,223 @@ pval_fourier <- function(x,
   build_multfourier_s3(raw, x, p, elapsed, "fourier", st$label)
 }
 
+#' Exact multinomial test p-value
+#'
+#' Computes the exact p-value \eqn{P\{T(Y) \ge T(x)\}},
+#' \eqn{Y \sim \mathrm{Multinomial}(N, p)}, of a multinomial goodness-of-fit
+#' test, up to floating-point rounding. Instead of enumerating the support, it
+#' prunes whole groups of outcomes using bounds on the statistic (see Details).
+#' \code{pval_exhaustive()} is a deprecated alias.
+#'
+#' @inheritParams pval_fourier
+#' @param n_threads Number of threads (positive integer, capped at the number of
+#'   available cores). Default \code{min(2L, parallel::detectCores())}.
+#' @param max_time Optional time limit in seconds. \code{NULL} (default) means no
+#'   limit. The limit is only checked between blocks of values of the first
+#'   category, so a run can exceed it by a wide margin; if it is reached,
+#'   \code{pval} is \code{NA} and \code{status} is 1.
+#' @param engine \code{"speedup"} (default): branch pruning with bounds from a
+#'   dynamic program, described in Details. \code{"standard"}: the earlier
+#'   algorithm, which enumerates the first \eqn{K-2} categories and solves the last
+#'   two by bisection.
+#' @param verbose Logical; if \code{TRUE}, prints progress information. Default
+#'   \code{FALSE}.
+#' @param ... Advanced options passed to the C engine. Unknown names produce a
+#'   warning.
+#'
+#' @details
+#' The statistics are those of \code{\link{pval_fourier}}. Because the statistic
+#' is additive, a dynamic program over the \eqn{(N+1)K} states (category, trials
+#' left) first computes the exact minimum and maximum that the remaining
+#' categories can add to it, at cost \eqn{O(KN^2)}. Counts are then assigned one
+#' category at a time, in decreasing order of probability; whenever the bounds
+#' show that every completion of a partial assignment is (or none is) at least as
+#' extreme as the observed data, its whole probability is added (or it is
+#' discarded) without visiting it. Only partial assignments near the boundary
+#' \eqn{T(y) = T(x)} are expanded.
+#'
+#' The cost still grows quickly with the number of categories \eqn{K}. As a rough
+#' guide, in our tests with the log-likelihood ratio on 8 threads, instances with
+#' \eqn{K \le 6} and \eqn{N \le 1000} took under five minutes, while \eqn{K \ge 8}
+#' with \eqn{N \ge 500} did not finish within an hour. For large instances use
+#' \code{\link{pval_fourier}}.
+#'
+#' @return An object of class \code{"multfourier"}, as described in
+#' \code{\link{pval_fourier}}, with \code{method = "exact"}. The Fourier-specific
+#' components (\code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms} and the
+#' four diagnostics) are \code{NA}. \code{status} is 0 when the computation finished and 1 when
+#' \code{max_time} was reached.
+#'
+#' @seealso \code{\link{pval_fourier}}, \code{\link{pval_flexible}}.
+#'
+#' @examples
+#' p <- c(0.1, 0.2, 0.3, 0.4)
+#' x <- c(35, 30, 60, 75)
+#'
+#' pval_exact(x, p, stat = "llr")
+#' pval_exact(x, p, stat = "chi2")$pval
+#' pval_exact(x, p, stat = "pmf")$pval
+#' @export
+pval_exact <- function(x,
+                       p = rep(1/length(x), length(x)),
+                       stat = c("llr", "pd", "chi2", "pmf"),
+                       lambda = NULL,
+                       n_threads = min(2L, parallel::detectCores()),
+                       max_time = NULL,
+                       engine = c("speedup", "standard"),
+                       verbose = FALSE,
+                       ...) {
+  xp <- validate_x_p(x, p)
+  x <- xp$x
+  p <- xp$p
+
+  st <- resolve_stat_lambda(stat, lambda)
+  threads_val <- resolve_n_threads(n_threads)
+  engine <- match.arg(engine)
+
+  opts <- list(
+    method = "exhaustive",
+    stat = st$stat,
+    lambda = st$lambda,
+    n_threads = as.integer(threads_val),
+    engine = engine,
+    speedup = (engine == "speedup"),
+    max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
+    verbose = as.logical(verbose),
+    ...
+  )
+
+  t0 <- proc.time()
+  raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
+  elapsed <- (proc.time() - t0)[["elapsed"]]
+
+  build_multfourier_s3(raw, x, p, elapsed, "exact", st$label)
+}
+
+#' @rdname pval_exact
+#' @export
+pval_exhaustive <- function(...) {
+  .Deprecated("pval_exact")
+  pval_exact(...)
+}
+
+#' Multinomial test p-value, choosing the method automatically
+#'
+#' Computes the p-value with \code{\link{pval_exact}} when the instance is small
+#' and with \code{\link{pval_fourier}} otherwise.
+#'
+#' @inheritParams pval_fourier
+#' @param enum_cutoff Threshold on \eqn{\log_{10}} of the support size
+#'   \eqn{{N+K-1 \choose K-1}}{choose(N+K-1, K-1)} (the number of possible count vectors). Below it the
+#'   exact method is used, at or above it the Fourier method. Default 10. See
+#'   Details.
+#' @param n_threads Number of threads, passed to whichever method is chosen.
+#'   Default \code{min(2L, parallel::detectCores())}.
+#' @param max_time Optional time limit in seconds, passed to the chosen method.
+#' @param engine \code{"speedup"} (default) or \code{"standard"}, passed to the
+#'   chosen method.
+#'
+#' @details
+#' The cost of \code{\link{pval_exact}} depends strongly on the observed counts,
+#' not only on the support size, and it is highest far in the tail, where small
+#' p-values are computed. With counts drawn from the null hypothesis it takes
+#' about one second on 2 threads at a support of \eqn{10^{12}} to \eqn{10^{13}}
+#' outcomes (log-likelihood ratio, \eqn{K = 5, 6, 7}); with counts far in the
+#' tail it can take tens of seconds at a support of \eqn{10^{11}} (for example
+#' \eqn{K = 6}, \eqn{N = 400}, \eqn{p \approx 10^{-33}}). The default
+#' \code{enum_cutoff = 10} is a simple, conservative value that keeps the exact
+#' method for instances where it is fast in both situations.
+#'
+#' When the Fourier method is chosen and does not meet its stopping rule
+#' (\code{status != 0}), the result is returned as is; there is no automatic
+#' fallback to the exact method.
+#'
+#' @return An object of class \code{"multfourier"}, as described in
+#' \code{\link{pval_fourier}}; its \code{method} component (\code{"exact"} or
+#' \code{"fourier"}) shows which method was used.
+#'
+#' @seealso \code{\link{pval_fourier}}, \code{\link{pval_exact}}.
+#'
+#' @examples
+#' # Small instance (K = 4, N = 200): exact method
+#' pval_flexible(c(35, 30, 60, 75), c(0.1, 0.2, 0.3, 0.4))$method
+#'
+#' # Large instance (K = 8, N = 2000, about 10^19 outcomes): Fourier method
+#' fit <- pval_flexible(c(240, 260, 250, 270, 230, 250, 245, 255))
+#' fit$method
+#' fit$status
+#' @export
+pval_flexible <- function(x,
+                          p = rep(1/length(x), length(x)),
+                          stat = c("llr", "pd", "chi2", "pmf"),
+                          lambda = NULL,
+                          enum_cutoff = 10,
+                          undersampling = 1,
+                          rel_eps = 0.001,
+                          B = 50,
+                          max_terms = 10000,
+                          max_time = NULL,
+                          avg_window = 0,
+                          avg_flat = FALSE,
+                          n_threads = min(2L, parallel::detectCores()),
+                          precision = c("double", "double-double"),
+                          precompute = TRUE,
+                          engine = c("speedup", "standard"),
+                          verbose = FALSE,
+                          ...) {
+  xp <- validate_x_p(x, p)
+  x <- xp$x
+  p <- xp$p
+  if (undersampling <= 0) stop("'undersampling' must be strictly positive.")
+  if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
+  if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
+  if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
+  if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
+
+  st <- resolve_stat_lambda(stat, lambda)
+  threads_val <- resolve_n_threads(n_threads)
+  precision <- match.arg(precision)
+  engine <- match.arg(engine)
+
+  opts <- list(
+    method = "flexible",
+    stat = st$stat,
+    lambda = st$lambda,
+    enum_cutoff = as.numeric(enum_cutoff),
+    undersampling = as.numeric(undersampling),
+    avg_window = as.numeric(avg_window),
+    avg_flat = as.logical(avg_flat),
+    rel_eps = as.numeric(rel_eps),
+    max_terms = as.integer(max_terms),
+    B = as.integer(B),
+    n_threads = as.integer(threads_val),
+    precision = precision,
+    precompute = as.logical(precompute),
+    engine = engine,
+    speedup = (engine == "speedup"),
+    max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
+    verbose = as.logical(verbose),
+    ...
+  )
+
+  t0 <- proc.time()
+  raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
+  elapsed <- (proc.time() - t0)[["elapsed"]]
+
+  build_multfourier_s3(raw, x, p, elapsed, "flexible", st$label)
+}
+
 #' Print method for multfourier objects
 #'
-#' @param x Object of class \code{"multfourier"} returned by \code{pval_fourier}, \code{pval_exhaustive}, or \code{pval_flexible}.
+#' Prints the method, statistic, p-value, status and, for the Fourier method, the
+#' tilt, period half-width and number of terms.
+#'
+#' @param x Object of class \code{"multfourier"} returned by
+#'   \code{\link{pval_fourier}}, \code{\link{pval_exact}} or
+#'   \code{\link{pval_flexible}}.
 #' @param ... Additional arguments (currently unused).
 #'
-#' @return Invisibly returns the input object.
+#' @return Invisibly returns \code{x}.
 #' @export
 print.multfourier <- function(x, ...) {
   cat("Multinomial Test (MultFourier)\n")
@@ -358,11 +590,11 @@ print.multfourier <- function(x, ...) {
   cat(sprintf("%-11s: %s\n", "Statistic", x$stat))
   cat(sprintf("%-11s: %s\n", "p-value", format(x$pval, digits = 8)))
   cat(sprintf("%-11s: %s\n", "Status", paste0(x$status, " (", x$message, ")")))
-  if (!is.null(x$Gamma) && !is.na(x$Gamma)) {
-    cat(sprintf("%-11s: %s\n", "Gamma", format(x$Gamma, digits = 6)))
+  if (!is.null(x$gamma) && !is.na(x$gamma)) {
+    cat(sprintf("%-11s: %s\n", "Gamma", format(x$gamma, digits = 6)))
   }
-  if (!is.null(x$Time_gamma) && !is.na(x$Time_gamma)) {
-    cat(sprintf("%-11s: %s seconds\n", "Time gamma", format(x$Time_gamma, digits = 4)))
+  if (!is.null(x$time_gamma) && !is.na(x$time_gamma)) {
+    cat(sprintf("%-11s: %s seconds\n", "Time gamma", format(x$time_gamma, digits = 4)))
   }
   if (!is.null(x$W) && !is.na(x$W)) {
     cat(sprintf("%-11s: %s\n", "W", format(x$W, digits = 6)))

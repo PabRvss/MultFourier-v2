@@ -2,16 +2,17 @@
 % Please edit documentation in R/pvalues.R
 \name{pval_flexible}
 \alias{pval_flexible}
-\title{Multinomial p-value computation via flexible method}
+\title{Multinomial test p-value, choosing the method automatically}
 \usage{
 pval_flexible(
   x,
   p = rep(1/length(x), length(x)),
   stat = c("llr", "pd", "chi2", "pmf"),
-  lambda = 1,
+  lambda = NULL,
+  enum_cutoff = 10,
   undersampling = 1,
   rel_eps = 0.001,
-  B = 30,
+  B = 50,
   max_terms = 10000,
   max_time = NULL,
   avg_window = 0,
@@ -25,66 +26,113 @@ pval_flexible(
 )
 }
 \arguments{
-\item{x}{Numeric vector of observed counts for each category.}
+\item{x}{Vector of observed counts, one per category (non-negative integers,
+without missing values). Their sum is the number of trials \eqn{N}.}
 
-\item{p}{Numeric vector of theoretical probabilities under the null hypothesis (must sum to 1).}
+\item{p}{Vector of category probabilities under the null hypothesis, all
+strictly positive. If they do not sum to 1 they are normalized to
+\code{p / sum(p)}, with a warning; the normalized vector is the one stored
+in the result. Default: equiprobable categories.}
 
-\item{stat}{Test statistic: \code{"llr"} (Log-Likelihood Ratio), \code{"pd"} (Power Divergence), \code{"chi2"} (Pearson's Chi-squared), or \code{"pmf"} (Multinomial Point Probability Mass). Default is \code{"llr"}.}
+\item{stat}{Test statistic: \code{"llr"} (log-likelihood ratio \eqn{G^2}, the
+default), \code{"chi2"} (Pearson's \eqn{X^2}), \code{"pd"} (Cressie--Read
+power divergence with parameter \code{lambda}) or \code{"pmf"} (exact
+multinomial test, which orders outcomes by their probability). See Details.}
 
-\item{lambda}{Real parameter for Power Divergence when \code{stat = "pd"}. Default is 1. Ignored if \code{stat != "pd"}.}
+\item{lambda}{Parameter \eqn{\lambda} of the power-divergence statistic; used
+only when \code{stat = "pd"}, and then required (there is no default);
+a warning is issued if it is given for another statistic. Cressie and Read
+(1984) recommend \eqn{\lambda = 2/3}. \eqn{\lambda = -1} is not supported.}
 
-\item{undersampling}{Undersampling factor (> 0) for the period in the Fourier series. Default is 1.}
+\item{enum_cutoff}{Threshold on \eqn{\log_{10}} of the support size
+\eqn{{N+K-1 \choose K-1}}{choose(N+K-1, K-1)} (the number of possible count vectors). Below it the
+exact method is used, at or above it the Fourier method. Default 10. See
+Details.}
 
-\item{rel_eps}{Relative convergence tolerance (>= 0). Default is 0.001.}
+\item{undersampling}{Positive factor dividing the half-width \eqn{W} of the
+Fourier period. The default 1 uses the smallest \eqn{W} for which the series
+is exact. Values below 1 enlarge \eqn{W} (still exact, but more terms are
+needed); values above 1 shrink \eqn{W} below that minimum, so the series
+converges to a wrong value (aliasing). Intended for experimentation only.}
 
-\item{B}{Integer >= 0; number of consecutive terms within tolerance required for convergence. Default is 30.}
+\item{rel_eps}{Relative tolerance of the stopping rule (\eqn{\ge 0}). Default
+0.001. It controls how stable the partial sums must be before the series is
+truncated; it is \emph{not} a bound on the error of the returned p-value.}
 
-\item{max_terms}{Maximum number of harmonic terms to evaluate in the series (positive integer). Default is 10000.}
+\item{B}{Non-negative integer used by the term-size stopping rule: the series
+stops after \code{B} consecutive terms each smaller, relative to the partial
+sum, than \code{rel_eps / B}. Default 50; \code{B = 0} uses an internal value.}
 
-\item{max_time}{Maximum execution time in seconds (optional).}
+\item{max_terms}{Maximum number of series terms (positive integer). Default
+10000. If it is reached before the stopping rule is met, \code{status} is 2.}
 
-\item{avg_window}{Fraction of final partial sums to average (between 0 and 1). Default is 0.}
+\item{max_time}{Optional time limit in seconds, passed to the chosen method.}
 
-\item{avg_flat}{Logical; if TRUE, uses a flat moving average; if FALSE, applies linear weighting towards the end. Default is FALSE.}
+\item{avg_window}{Fraction (between 0 and 1) of the last partial sums to
+average into the reported value. Default 0 (no averaging). When positive, it
+replaces the extrapolated value of \code{engine = "speedup"}; averaging is a
+linear filter that can bias the result and is usually less accurate than the
+default.}
 
-\item{n_threads}{Number of execution threads (positive integer >= 1). Default is \code{min(2L, parallel::detectCores())}.}
+\item{avg_flat}{Logical; with \code{avg_window > 0}, \code{TRUE} gives equal
+weights and \code{FALSE} (default) weights that grow linearly towards the
+last partial sum.}
 
-\item{precision}{Arithmetic precision: "double" (standard) or "double-double" (extended precision). Default is "double".}
+\item{n_threads}{Number of threads, passed to whichever method is chosen.
+Default \code{min(2L, parallel::detectCores())}.}
 
-\item{precompute}{Logical; if TRUE, uses precomputed transforms for acceleration. Default is TRUE.}
+\item{precision}{Floating-point precision of the term evaluator:
+\code{"double"} (default) or \code{"double-double"}. Only used with
+\code{engine = "standard"}; ignored by the default engine.}
 
-\item{engine}{Computational engine: \code{"speedup"} (default, using Poisson series, Newton saddlepoint search, O(K) bounds, and Shanks extrapolation) or \code{"standard"} (classic polynomial convolution and bisection algorithms). Default is "speedup".}
+\item{precompute}{Logical; if \code{TRUE} (default), precomputes the FFT plan
+of the term evaluator. Only used with \code{engine = "standard"}.}
 
-\item{verbose}{Logical; if TRUE, prints progress information. Default is FALSE.}
+\item{engine}{\code{"speedup"} (default) or \code{"standard"}, passed to the
+chosen method.}
 
-\item{...}{Additional internal parameters passed to the C engine (e.g. \code{enum_cutoff = 7.4}, the threshold for \eqn{\log_{10}} support size under which exact bisection is selected, corresponding to approximately 1 second of execution).}
+\item{verbose}{Logical; if \code{TRUE}, prints the partial sums and diagnostic
+information while running. Default \code{FALSE}.}
+
+\item{...}{Advanced options passed to the C engine, for example
+\code{print_freq} (how often partial sums are printed when
+\code{verbose = TRUE}; default 100) or \code{extrapolate} (0: no
+extrapolation; 1: report the extrapolated value; 2: also stop on it, the
+default of \code{engine = "speedup"}). Unknown names produce a warning.}
 }
 \value{
-Returns an S3 object of class \code{"multfourier"} with the following attributes:
-\describe{
-  \item{x}{The input vector of observed realizations for each category.}
-  \item{p}{The input vector of probabilities for each category under the null hypothesis.}
-  \item{pval}{The computed p-value.}
-  \item{Time_gamma}{The time spent optimizing gamma in seconds.}
-  \item{W}{The effective width of the distribution support interval.}
-  \item{stat}{A string describing the test statistic used (e.g. \code{"Log-Likelihood Ratio"}, \code{"Pearson's Chi-Square"}, \code{"Probability Mass Function"}, or \code{"power-divergence (lambda = ...)"}).}
-  \item{Gamma}{The optimal gamma obtained in the first part of the method.}
-  \item{n_terms}{The number of terms of the Fourier sum evaluated.}
-  \item{time}{The total execution time of the algorithm in seconds.}
-  \item{status}{The final status ID of the algorithm upon completion:
-    \itemize{
-      \item \code{0}: Converged.
-      \item \code{1}: Maximum time reached.
-      \item \code{2}: Maximum number of terms reached.
-      \item \code{3}: Could not solve the optimization of gamma.
-      \item \code{4}: Numerical instability detected (magnitude explosion).
-    }
-  }
-  \item{message}{The finishing status displayed as a human-readable message.}
-  \item{method}{A string with value \code{"fourier"} or \code{"exhaustive"}.}
-}
+An object of class \code{"multfourier"}, as described in
+\code{\link{pval_fourier}}; its \code{method} component (\code{"exact"} or
+\code{"fourier"}) shows which method was used.
 }
 \description{
-Evaluates whether the dimension of the multinomial support allows exact
-enumeration (iterative bisection) or routes to the Fourier inversion series method.
+Computes the p-value with \code{\link{pval_exact}} when the instance is small
+and with \code{\link{pval_fourier}} otherwise.
+}
+\details{
+The cost of \code{\link{pval_exact}} depends strongly on the observed counts,
+not only on the support size, and it is highest far in the tail, where small
+p-values are computed. With counts drawn from the null hypothesis it takes
+about one second on 2 threads at a support of \eqn{10^{12}} to \eqn{10^{13}}
+outcomes (log-likelihood ratio, \eqn{K = 5, 6, 7}); with counts far in the
+tail it can take tens of seconds at a support of \eqn{10^{11}} (for example
+\eqn{K = 6}, \eqn{N = 400}, \eqn{p \approx 10^{-33}}). The default
+\code{enum_cutoff = 10} is a simple, conservative value that keeps the exact
+method for instances where it is fast in both situations.
+
+When the Fourier method is chosen and does not meet its stopping rule
+(\code{status != 0}), the result is returned as is; there is no automatic
+fallback to the exact method.
+}
+\examples{
+# Small instance (K = 4, N = 200): exact method
+pval_flexible(c(35, 30, 60, 75), c(0.1, 0.2, 0.3, 0.4))$method
+
+# Large instance (K = 8, N = 2000, about 10^19 outcomes): Fourier method
+fit <- pval_flexible(c(240, 260, 250, 270, 230, 250, 245, 255))
+fit$method
+fit$status
+}
+\seealso{
+\code{\link{pval_fourier}}, \code{\link{pval_exact}}.
 }
