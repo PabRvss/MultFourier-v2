@@ -1,6 +1,6 @@
 Package: MultFourier
 Type: Package
-Title: Computes the p-values for Multinomial Goodness-of-fit tests
+Title: p-Values of Multinomial Goodness-of-Fit Tests by Fourier Series Inversion
 Version: 1.0
 Author: Charles Thraves, Pablo Rivas, Felipe Subiabre
 Maintainer: Pablo Rivas <pablo.rivas.g@ug.uchile.cl>
@@ -9,12 +9,15 @@ Authors@R:
       person("Pablo", "Rivas", role = c("aut", "cre"), email = "pablo.rivas.g@ug.uchile.cl"),
       person("Felipe", "Subiabre", role = "aut"))
 Description: 
-    Computes the p-value for an exact Multinomial, Pearson's Chi-Squared, 
-    log-likelihood ratio, or Power-Divergence tests. The main function,
-    pval_fourier, uses a Fourier series expansion. Also, the library provides an
-    exhaustive method pval_exhaustive, which evaluates all elements within the 
-    support of the Multinomial distribution. The function pval_flexible uses 
-    either of these methods, depending on the size of the instance.
+    Computes p-values of multinomial goodness-of-fit tests based on an
+    additive statistic: the log-likelihood ratio, Pearson's chi-squared, the
+    Cressie-Read power divergence, and the exact multinomial test. The main
+    function, pval_fourier(), writes the p-value as a Fourier series in the
+    moment-generating function of the statistic and sums it until an adaptive
+    stopping rule is met, which makes small p-values of large instances
+    computable. The function pval_exact() computes the exact p-value by
+    branch pruning with bounds from a dynamic program, and pval_flexible()
+    chooses between the two according to the size of the instance.
 License: GPL (>= 2)
 Encoding: UTF-8
 Suggests: 

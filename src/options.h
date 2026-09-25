@@ -47,11 +47,11 @@ static void set_options_default(options_t* options) {
 
     options->eps_rel = 1e-3;
     options->max_iter = 10000;
-    options->B = 30;
+    options->B = 50;
     options->undersampling = 1.0;
 
     options->eps_gamma = 1e-2;
-    options->enum_cutoff = 7.4;
+    options->enum_cutoff = 10.0;
 
     options->gamma_newton = 1;
     options->poisson = 1;

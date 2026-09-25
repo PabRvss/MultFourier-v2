@@ -185,7 +185,7 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
 
     options.eps_rel = get_opt_double(r_opts, "rel_eps", 1e-3);
     options.max_iter = get_opt_int(r_opts, "max_terms", 10000);
-    options.B = get_opt_int(r_opts, "B", 30);
+    options.B = get_opt_int(r_opts, "B", 50);
 
     /* Thread count */
     SEXP r_th = get_list_element(r_opts, "n_threads");
@@ -252,7 +252,7 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
     } else if (strcmp(method_str, "exhaustive") == 0) {
         run_fourier = 0;
     } else { /* "flexible" */
-        real_t cutoff = get_opt_double(r_opts, "enum_cutoff", 7.4);
+        real_t cutoff = get_opt_double(r_opts, "enum_cutoff", 10.0);
         real_t supp = (lgac[N + K - 1] - lgac[N] - lgac[K - 1]) / LOG(10.0);
         run_fourier = (supp >= cutoff) ? 1 : 0;
     }
