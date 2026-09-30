@@ -49,7 +49,6 @@ Report bugs at \url{https://github.com/PabRvss/MultFourier-v2/issues}.
 
 Authors:
 \itemize{
-  \item Pablo Rivas \email{pablo.rivas.g@ug.uchile.cl}
   \item Charles Thraves
   \item Felipe Subiabre
 }

@@ -73,7 +73,7 @@ sum, than \code{rel_eps / B}. Default 50; \code{B = 0} uses an internal value.}
 \item{max_time}{Optional time limit in seconds, passed to the chosen method.}
 
 \item{exact_terms}{Logical; if \code{FALSE} (default), evaluates the Fourier
-terms using the fast Poissonised Cauchy-integral evaluator. If \code{TRUE},
+terms using the fast Poissonized Cauchy-integral evaluator. If \code{TRUE},
 evaluates each term exactly via polynomial convolution.}
 
 \item{n_threads}{Number of threads, passed to whichever method is chosen.
