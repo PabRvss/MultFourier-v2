@@ -221,6 +221,7 @@ static real_t exhaustive_bounds_recurse(
 typedef struct {
     bounds_ctx_t ctx;
     real_t logp_acc0;  // lgac[N]
+    real_t r_start;    // -tau: accumulated reward at the root (see exhaustive_tie_tolerance)
     atomic_int_fast64_t* restrict next_n0;
     real_t p_acc;
     const options_t* options;
@@ -249,7 +250,7 @@ static void* exhaustive_bounds_thread(void* args_void) {
         const int_t n0_end = n0_start + BOUNDS_CHUNK - 1 > N ? N : n0_start + BOUNDS_CHUNK - 1;
         for (int_t n0 = n0_start; n0 <= n0_end; n0++) {
             const int_t N_next = N - n0;
-            const real_t r = ctx->reward[n0];
+            const real_t r = args->r_start + ctx->reward[n0];
 
             if (K == 1) {
                 if (r <= 0) p_acc += EXP(MAX_EXP + args->logp_acc0 + ctx->log_prob[n0]);
@@ -274,7 +275,7 @@ static void* exhaustive_bounds_thread(void* args_void) {
 }
 
 static void exhaustive_bounds_parallel(
-        const bounds_ctx_t* restrict ctx, const real_t logp_acc0, real_t* restrict p_acc, const int_t threads,
+        const bounds_ctx_t* restrict ctx, const real_t logp_acc0, const real_t r_start, real_t* restrict p_acc, const int_t threads,
         const options_t* options, atomic_int* timed_out
 ) {
     const int_t N = ctx->N;
@@ -290,7 +291,7 @@ static void exhaustive_bounds_parallel(
         }
         atomic_int_fast64_t next_n0;
         atomic_init(&next_n0, 0);
-        bounds_thread_args_t args = { .ctx = *ctx, .logp_acc0 = logp_acc0, .next_n0 = &next_n0, .p_acc = 0, .options = options, .timed_out = timed_out };
+        bounds_thread_args_t args = { .ctx = *ctx, .logp_acc0 = logp_acc0, .r_start = r_start, .next_n0 = &next_n0, .p_acc = 0, .options = options, .timed_out = timed_out };
         exhaustive_bounds_thread(&args);
         *p_acc = args.p_acc;
         return;
@@ -307,6 +308,7 @@ static void exhaustive_bounds_parallel(
     for (int_t t = 0; t < n_threads; t++) {
         args[t].ctx = *ctx;
         args[t].logp_acc0 = logp_acc0;
+        args[t].r_start = r_start;
         args[t].next_n0 = &next_n0;
         args[t].p_acc = 0;
         args[t].options = options;
@@ -379,9 +381,10 @@ static void exhaustive_bounds(multinomial* mult, multinomial_result* mult_res, o
 
     real_t p_acc = 0;
     const real_t logp_acc0 = lgac[N];
+    const real_t r_start = -exhaustive_tie_tolerance(mult);  // accept S - S0 <= tau: exact ties count
     atomic_int timed_out;
     atomic_init(&timed_out, 0);
-    exhaustive_bounds_parallel(&ctx, logp_acc0, &p_acc, options->threads > 1 ? options->threads : 1, options, &timed_out);
+    exhaustive_bounds_parallel(&ctx, logp_acc0, r_start, &p_acc, options->threads > 1 ? options->threads : 1, options, &timed_out);
 
     if (atomic_load(&timed_out)) {
         mult_res->status = 1;

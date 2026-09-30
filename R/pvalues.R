@@ -10,6 +10,8 @@ build_multfourier_s3 <- function(raw, x, p, elapsed, requested_method, stat_labe
   time_gamma_val <- if (method_name == "fourier") as.numeric(raw$eval_time) else NA_real_
   w_val <- if (method_name == "fourier") as.numeric(raw$W) else NA_real_
   n_terms_val <- if (method_name == "fourier") as.integer(raw$terms) else NA_integer_
+  q_val <- if (method_name == "fourier" && !is.null(raw$Q) && !is.na(raw$Q) && raw$Q > 0) as.integer(raw$Q) else NA_integer_
+  dq_val <- if (method_name == "fourier" && !is.null(raw$D_Q)) as.numeric(raw$D_Q) else NA_real_
   
   # Status ID y mensajes sin punto al final:
   # 0: Converged
@@ -47,6 +49,8 @@ build_multfourier_s3 <- function(raw, x, p, elapsed, requested_method, stat_labe
     time_gamma = time_gamma_val,
     W = w_val,
     n_terms = n_terms_val,
+    Q = q_val,
+    D_Q = dq_val,
     err_rel_ext = diag_val(raw$err_rel_ext),
     err_rel_est = diag_val(raw$err_rel_est),
     n_eff = diag_val(raw$n_eff),
@@ -117,8 +121,8 @@ resolve_stat_lambda <- function(stat, lambda = NULL) {
     if (length(lambda) != 1L || !is.numeric(lambda) || !is.finite(lambda)) {
       stop("'lambda' must be a single finite real number.")
     }
-    if (abs(lambda + 1) < 1e-8) {
-      stop("'lambda = -1' is not supported; use a value different from -1.")
+    if (lambda <= -1) {
+      stop("'lambda' must be strictly greater than -1.")
     }
     lambda_val <- as.numeric(lambda)
     stat_label <- sprintf("power-divergence (lambda = %s)", format(lambda_val))
@@ -182,30 +186,21 @@ resolve_n_threads <- function(n_threads) {
 #'   10000. If it is reached before the stopping rule is met, \code{status} is 2.
 #' @param max_time Optional time limit in seconds. \code{NULL} (default) means no
 #'   limit. When it is reached, \code{status} is 1.
-#' @param avg_window Fraction (between 0 and 1) of the last partial sums to
-#'   average into the reported value. Default 0 (no averaging). When positive, it
-#'   replaces the extrapolated value of \code{engine = "speedup"}; averaging is a
-#'   linear filter that can bias the result and is usually less accurate than the
-#'   default.
-#' @param avg_flat Logical; with \code{avg_window > 0}, \code{TRUE} gives equal
-#'   weights and \code{FALSE} (default) weights that grow linearly towards the
-#'   last partial sum.
 #' @param n_threads Number of threads used to evaluate the series terms (positive
 #'   integer, capped at the number of available cores). Default
 #'   \code{min(2L, parallel::detectCores())}.
-#' @param precision Floating-point precision of the term evaluator:
-#'   \code{"double"} (default) or \code{"double-double"}. Only used with
-#'   \code{engine = "standard"}; ignored by the default engine.
+#' @param exact_terms Logical; if \code{FALSE} (default), evaluates the Fourier
+#'   terms using the fast Poissonised Cauchy-integral evaluator. If \code{TRUE},
+#'   evaluates each term exactly via polynomial convolution.
 #' @param precompute Logical; if \code{TRUE} (default), precomputes the FFT plan
-#'   of the term evaluator. Only used with \code{engine = "standard"}.
-#' @param engine \code{"speedup"} (default) or \code{"standard"}. See Details.
+#'   when evaluating terms via polynomial convolution (\code{exact_terms = TRUE}).
 #' @param verbose Logical; if \code{TRUE}, prints the partial sums and diagnostic
 #'   information while running. Default \code{FALSE}.
 #' @param ... Advanced options passed to the C engine, for example
 #'   \code{print_freq} (how often partial sums are printed when
 #'   \code{verbose = TRUE}; default 100) or \code{extrapolate} (0: no
 #'   extrapolation; 1: report the extrapolated value; 2: also stop on it, the
-#'   default of \code{engine = "speedup"}). Unknown names produce a warning.
+#'   default). Unknown names produce a warning.
 #'
 #' @details
 #' \strong{Statistics.} All supported statistics are additive,
@@ -234,23 +229,19 @@ resolve_n_threads <- function(n_threads) {
 #' converge within \code{max_terms} (\code{status = 2}) or even return a negative
 #' value. In that case use \code{\link{pval_exact}} when it is feasible.
 #'
-#' \strong{Stopping rule and reported value.} With \code{engine = "speedup"} the
+#' \strong{Stopping rule and reported value.} The
 #' partial sums are accelerated with Wynn's epsilon algorithm (in the safeguarded
 #' form of QUADPACK's DQELG) and smoothed with a running median of five. The
 #' series stops as soon as either (i) \code{B} consecutive terms are each smaller
 #' than \code{rel_eps / B} relative to the partial sum, or (ii) the smoothed
 #' extrapolated values vary by at most a relative \code{rel_eps} over a trailing
 #' window covering the last half of the terms. The reported \pvalue{} is the last
-#' smoothed extrapolated value. With \code{engine = "standard"} only rule (i) is
-#' used and the reported \pvalue{} is the last partial sum.
+#' smoothed extrapolated value.
 #'
-#' \strong{Engines.} \code{"speedup"} evaluates the terms with a Poissonized
-#' Cauchy-integral evaluator, chooses the exponential tilt \code{gamma} by a
-#' Newton saddlepoint search, computes the range of the statistic in closed form,
-#' and uses the extrapolation described above. \code{"standard"} is the earlier
-#' implementation: polynomial convolution evaluated by FFT, a grid search for the
-#' tilt, a dynamic program for the range, and no extrapolation. Both compute the
-#' same series.
+#' \strong{Term evaluation.} With \code{exact_terms = FALSE} (default), terms are
+#' evaluated via a Poissonised Cauchy-integral evaluator, which is significantly
+#' faster on large instances. With \code{exact_terms = TRUE}, terms are evaluated
+#' via exact polynomial convolution.
 #'
 #' @return An object of class \code{"multfourier"}: a list with components
 #' \describe{
@@ -288,10 +279,13 @@ resolve_n_threads <- function(n_threads) {
 #'   \item{nu_max_ratio}{Largest size of the late transform values relative to
 #'     the first one; values near 1 mean the terms are not decaying (a lattice-like
 #'     statistic).}
+#'   \item{Q}{Number of quadrature points (FFT grid size) for the Poissonised
+#'     evaluator.}
+#'   \item{D_Q}{Relative aliasing error estimate for \code{Q}.}
 #' }
-#' The last four components (\code{err_rel_ext}, \code{err_rel_est},
-#' \code{n_eff} and \code{nu_max_ratio}) are diagnostics of the series; they are heuristics,
-#' not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
+#' The last six components (\code{err_rel_ext}, \code{err_rel_est},
+#' \code{n_eff}, \code{nu_max_ratio}, \code{Q} and \code{D_Q}) are diagnostics
+#' of the series. The names \code{Gamma} and \code{Time_gamma} used by earlier
 #' versions still work, with a deprecation warning.
 #'
 #' @references
@@ -335,12 +329,9 @@ pval_fourier <- function(x,
                          B = 50,
                          max_terms = 10000,
                          max_time = NULL,
-                         avg_window = 0,
-                         avg_flat = FALSE,
                          n_threads = min(2L, parallel::detectCores()),
-                         precision = c("double", "double-double"),
+                         exact_terms = FALSE,
                          precompute = TRUE,
-                         engine = c("speedup", "standard"),
                          verbose = FALSE,
                          ...) {
   xp <- validate_x_p(x, p, rescale_p)
@@ -350,28 +341,25 @@ pval_fourier <- function(x,
   if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
   if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
   if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
-  if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
+  if (!is.logical(exact_terms) || length(exact_terms) != 1L || is.na(exact_terms)) {
+    stop("'exact_terms' must be TRUE or FALSE.")
+  }
 
   st <- resolve_stat_lambda(stat, lambda)
   threads_val <- resolve_n_threads(n_threads)
-  precision <- match.arg(precision)
-  engine <- match.arg(engine)
 
   opts <- list(
     method = "fourier",
     stat = st$stat,
     lambda = st$lambda,
     undersampling = as.numeric(undersampling),
-    avg_window = as.numeric(avg_window),
-    avg_flat = as.logical(avg_flat),
     rel_eps = as.numeric(rel_eps),
     max_terms = as.integer(max_terms),
     B = as.integer(B),
     n_threads = as.integer(threads_val),
-    precision = precision,
+    exact_terms = as.logical(exact_terms),
+    poisson = if (isTRUE(exact_terms)) 0L else 1L,
     precompute = as.logical(precompute),
-    engine = engine,
-    speedup = (engine == "speedup"),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
     verbose = as.logical(verbose),
     ...
@@ -399,10 +387,6 @@ pval_fourier <- function(x,
 #'   limit. The limit is only checked between blocks of values of the first
 #'   category, so a run can exceed it by a wide margin; if it is reached,
 #'   \code{pval} is \code{NA} and \code{status} is 1.
-#' @param engine \code{"speedup"} (default): branch pruning with bounds from a
-#'   dynamic program, described in Details. \code{"standard"}: the earlier
-#'   algorithm, which enumerates the first \eqn{K-2} categories and solves the last
-#'   two by bisection.
 #' @param verbose Logical; if \code{TRUE}, prints progress information. Default
 #'   \code{FALSE}.
 #' @param ... Advanced options passed to the C engine. Unknown names produce a
@@ -442,8 +426,8 @@ pval_fourier <- function(x,
 #' }
 #' The components that describe the Fourier series are also present, so that
 #' results of both methods have the same structure, but are always \code{NA}:
-#' \code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms}, \code{err_rel_ext},
-#' \code{err_rel_est}, \code{n_eff} and \code{nu_max_ratio}.
+#' \code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms}, \code{Q}, \code{D_Q},
+#' \code{err_rel_ext}, \code{err_rel_est}, \code{n_eff} and \code{nu_max_ratio}.
 #'
 #' @seealso \code{\link{pval_fourier}}, \code{\link{pval_flexible}}.
 #'
@@ -472,7 +456,6 @@ pval_exact <- function(x,
                        rescale_p = FALSE,
                        n_threads = min(2L, parallel::detectCores()),
                        max_time = NULL,
-                       engine = c("speedup", "standard"),
                        verbose = FALSE,
                        ...) {
   xp <- validate_x_p(x, p, rescale_p)
@@ -481,15 +464,12 @@ pval_exact <- function(x,
 
   st <- resolve_stat_lambda(stat, lambda)
   threads_val <- resolve_n_threads(n_threads)
-  engine <- match.arg(engine)
 
   opts <- list(
     method = "exhaustive",
     stat = st$stat,
     lambda = st$lambda,
     n_threads = as.integer(threads_val),
-    engine = engine,
-    speedup = (engine == "speedup"),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
     verbose = as.logical(verbose),
     ...
@@ -522,8 +502,6 @@ pval_exhaustive <- function(...) {
 #' @param n_threads Number of threads, passed to whichever method is chosen.
 #'   Default \code{min(2L, parallel::detectCores())}.
 #' @param max_time Optional time limit in seconds, passed to the chosen method.
-#' @param engine \code{"speedup"} (default) or \code{"standard"}, passed to the
-#'   chosen method.
 #'
 #' @details
 #' The cost of \code{\link{pval_exact}} depends strongly on the observed counts,
@@ -574,12 +552,9 @@ pval_flexible <- function(x,
                           B = 50,
                           max_terms = 10000,
                           max_time = NULL,
-                          avg_window = 0,
-                          avg_flat = FALSE,
+                          exact_terms = FALSE,
                           n_threads = min(2L, parallel::detectCores()),
-                          precision = c("double", "double-double"),
                           precompute = TRUE,
-                          engine = c("speedup", "standard"),
                           verbose = FALSE,
                           ...) {
   xp <- validate_x_p(x, p, rescale_p)
@@ -589,12 +564,9 @@ pval_flexible <- function(x,
   if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
   if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
   if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
-  if (avg_window < 0 || avg_window > 1) stop("'avg_window' must be between 0 and 1.")
 
   st <- resolve_stat_lambda(stat, lambda)
   threads_val <- resolve_n_threads(n_threads)
-  precision <- match.arg(precision)
-  engine <- match.arg(engine)
 
   opts <- list(
     method = "flexible",
@@ -602,16 +574,13 @@ pval_flexible <- function(x,
     lambda = st$lambda,
     enum_cutoff = as.numeric(enum_cutoff),
     undersampling = as.numeric(undersampling),
-    avg_window = as.numeric(avg_window),
-    avg_flat = as.logical(avg_flat),
     rel_eps = as.numeric(rel_eps),
     max_terms = as.integer(max_terms),
     B = as.integer(B),
     n_threads = as.integer(threads_val),
-    precision = precision,
+    exact_terms = as.logical(exact_terms),
+    poisson = if (isTRUE(exact_terms)) 0L else 1L,
     precompute = as.logical(precompute),
-    engine = engine,
-    speedup = (engine == "speedup"),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
     verbose = as.logical(verbose),
     ...

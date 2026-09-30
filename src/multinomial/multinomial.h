@@ -36,6 +36,8 @@ typedef struct {
     double W;
     int_t status;
     int_t method;
+    int_t Q;
+    real_t DQ_relative;
 } multinomial_result;
 
 static multinomial* get_mult(const int_t N, const int_t K, const real_t* restrict probs, const options_t* options) {
@@ -100,6 +102,24 @@ static void fill_rewards(multinomial* mult, const int_t* restrict x0, const opti
         }
     }
     mult->r0 = r0;
+}
+
+#ifndef EXHAUSTIVE_TIE_REL
+#define EXHAUSTIVE_TIE_REL 1e-11
+#endif
+
+static real_t exhaustive_tie_tolerance(const multinomial* mult) {
+    const int_t N = mult->N;
+    real_t scale = 0;
+    for (int_t k=0; k<mult->K; k++) {
+        real_t m = 0;
+        for (int_t i=0; i<=N; i++) {
+            const real_t a = ABS(mult->matrix[k*(N+1) + i].reward);
+            if (a > m) m = a;
+        }
+        scale += m;
+    }
+    return EXHAUSTIVE_TIE_REL*scale;
 }
 
 static void fill_interval(multinomial* mult, const options_t* options) {
@@ -167,10 +187,6 @@ typedef struct {
 } args_gamma_t;
 
 #include "multinomial_fft.h"
-#ifdef ENABLE_QUADMATH
-#include "../multinomial_quad/multinomial_fft_quad.h"
-#endif
-#include "../multinomial_dd/multinomial_fft_dd.h"
 
 static void* eval_gammas_thread(void* args_void) {
     args_gamma_t* args = args_void;
@@ -276,10 +292,6 @@ static void eval_gammas(
     void* (*eval_fn)(void*);
     switch (gamma_precision) {
         case FFT_REAL: eval_fn = eval_gammas_fft_thread; break;
-        case FFT_DD:   eval_fn = eval_gammas_fft_dd_thread; break;
-#ifdef ENABLE_QUADMATH
-        case FFT_QUAD: eval_fn = eval_gammas_fft_quad_thread; break;
-#endif
         case FFT_NONE: default: eval_fn = eval_gammas_thread; break;
     }
     for (int_t i=0; i<threads; i++) {

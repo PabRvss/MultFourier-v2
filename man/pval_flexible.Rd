@@ -16,12 +16,9 @@ pval_flexible(
   B = 50,
   max_terms = 10000,
   max_time = NULL,
-  avg_window = 0,
-  avg_flat = FALSE,
+  exact_terms = FALSE,
   n_threads = min(2L, parallel::detectCores()),
-  precision = c("double", "double-double"),
   precompute = TRUE,
-  engine = c("speedup", "standard"),
   verbose = FALSE,
   ...
 )
@@ -75,28 +72,15 @@ sum, than \code{rel_eps / B}. Default 50; \code{B = 0} uses an internal value.}
 
 \item{max_time}{Optional time limit in seconds, passed to the chosen method.}
 
-\item{avg_window}{Fraction (between 0 and 1) of the last partial sums to
-average into the reported value. Default 0 (no averaging). When positive, it
-replaces the extrapolated value of \code{engine = "speedup"}; averaging is a
-linear filter that can bias the result and is usually less accurate than the
-default.}
-
-\item{avg_flat}{Logical; with \code{avg_window > 0}, \code{TRUE} gives equal
-weights and \code{FALSE} (default) weights that grow linearly towards the
-last partial sum.}
+\item{exact_terms}{Logical; if \code{FALSE} (default), evaluates the Fourier
+terms using the fast Poissonised Cauchy-integral evaluator. If \code{TRUE},
+evaluates each term exactly via polynomial convolution.}
 
 \item{n_threads}{Number of threads, passed to whichever method is chosen.
 Default \code{min(2L, parallel::detectCores())}.}
 
-\item{precision}{Floating-point precision of the term evaluator:
-\code{"double"} (default) or \code{"double-double"}. Only used with
-\code{engine = "standard"}; ignored by the default engine.}
-
 \item{precompute}{Logical; if \code{TRUE} (default), precomputes the FFT plan
-of the term evaluator. Only used with \code{engine = "standard"}.}
-
-\item{engine}{\code{"speedup"} (default) or \code{"standard"}, passed to the
-chosen method.}
+when evaluating terms via polynomial convolution (\code{exact_terms = TRUE}).}
 
 \item{verbose}{Logical; if \code{TRUE}, prints the partial sums and diagnostic
 information while running. Default \code{FALSE}.}
@@ -105,7 +89,7 @@ information while running. Default \code{FALSE}.}
 \code{print_freq} (how often partial sums are printed when
 \code{verbose = TRUE}; default 100) or \code{extrapolate} (0: no
 extrapolation; 1: report the extrapolated value; 2: also stop on it, the
-default of \code{engine = "speedup"}). Unknown names produce a warning.}
+default). Unknown names produce a warning.}
 }
 \value{
 An object of class \code{"multfourier"}, as described in

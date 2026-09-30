@@ -13,7 +13,6 @@ pval_exact(
   rescale_p = FALSE,
   n_threads = min(2L, parallel::detectCores()),
   max_time = NULL,
-  engine = c("speedup", "standard"),
   verbose = FALSE,
   ...
 )
@@ -53,11 +52,6 @@ limit. The limit is only checked between blocks of values of the first
 category, so a run can exceed it by a wide margin; if it is reached,
 \code{pval} is \code{NA} and \code{status} is 1.}
 
-\item{engine}{\code{"speedup"} (default): branch pruning with bounds from a
-dynamic program, described in Details. \code{"standard"}: the earlier
-algorithm, which enumerates the first \eqn{K-2} categories and solves the last
-two by bisection.}
-
 \item{verbose}{Logical; if \code{TRUE}, prints progress information. Default
 \code{FALSE}.}
 
@@ -82,8 +76,8 @@ An object of class \code{"multfourier"}: a list with components
 }
 The components that describe the Fourier series are also present, so that
 results of both methods have the same structure, but are always \code{NA}:
-\code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms}, \code{err_rel_ext},
-\code{err_rel_est}, \code{n_eff} and \code{nu_max_ratio}.
+\code{gamma}, \code{time_gamma}, \code{W}, \code{n_terms}, \code{Q}, \code{D_Q},
+\code{err_rel_ext}, \code{err_rel_est}, \code{n_eff} and \code{nu_max_ratio}.
 }
 \description{
 Computes the exact \pvalue{} \eqn{P\{T(Y) \ge T(x)\}}{P{T(Y) >= T(x)}},

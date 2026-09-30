@@ -27,7 +27,7 @@ static const char* KNOWN_KEYS[] = {
     "precision", "precompute", "max_time", "verbose", "print_freq", "enum_cutoff",
     "eps_gamma", "error_bound",
     "poisson", "gamma_newton", "fast_interval", "fast_exhaustive", "extrapolate",
-    "speedup", "engine"
+    "speedup", "engine", "exact_terms"
 };
 static const int N_KNOWN_KEYS = sizeof(KNOWN_KEYS) / sizeof(KNOWN_KEYS[0]);
 
@@ -90,8 +90,8 @@ static const char* get_opt_str(SEXP list, const char* name, const char* def_val)
 }
 
 static SEXP pack_result(const multinomial_result* mult_res) {
-    SEXP res   = PROTECT(Rf_allocVector(VECSXP, 13));
-    SEXP names = PROTECT(Rf_allocVector(STRSXP, 13));
+    SEXP res   = PROTECT(Rf_allocVector(VECSXP, 15));
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 15));
 
     SET_VECTOR_ELT(res, 0, Rf_ScalarReal(mult_res->pval));
     SET_STRING_ELT(names, 0, Rf_mkChar("pval"));
@@ -132,6 +132,20 @@ static SEXP pack_result(const multinomial_result* mult_res) {
     SET_VECTOR_ELT(res, 12, Rf_ScalarReal(mult_res->err_rel_ext));
     SET_STRING_ELT(names, 12, Rf_mkChar("err_rel_ext"));
 
+    if (mult_res->Q > 0) {
+        SET_VECTOR_ELT(res, 13, Rf_ScalarInteger((int)mult_res->Q));
+    } else {
+        SET_VECTOR_ELT(res, 13, Rf_ScalarInteger(NA_INTEGER));
+    }
+    SET_STRING_ELT(names, 13, Rf_mkChar("Q"));
+
+    if (isnan(mult_res->DQ_relative)) {
+        SET_VECTOR_ELT(res, 14, Rf_ScalarReal(NA_REAL));
+    } else {
+        SET_VECTOR_ELT(res, 14, Rf_ScalarReal((double)mult_res->DQ_relative));
+    }
+    SET_STRING_ELT(names, 14, Rf_mkChar("D_Q"));
+
     Rf_setAttrib(res, R_NamesSymbol, names);
     UNPROTECT(2);
     return res;
@@ -163,25 +177,13 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
 
     /* Lambda parameter for power divergence statistics */
     options.lambda = get_opt_double(r_opts, "lambda", 0.0);
+    if (!isnan(options.lambda) && options.lambda <= -1.0) {
+        Rf_error("multfourier: 'lambda' must be strictly greater than -1.");
+    }
 
     /* Undersampling aliasing factor (> 0) */
     options.undersampling = get_opt_double(r_opts, "undersampling", 1.0);
     if (options.undersampling <= 0.0) options.undersampling = 1.0;
-
-    /* Windowed averaging parameters */
-    SEXP r_aw = get_list_element(r_opts, "avg_window");
-    if (r_aw == R_NilValue) r_aw = get_list_element(r_opts, "average_window");
-    if (r_aw != R_NilValue && Rf_length(r_aw) > 0) {
-        options.average_window = Rf_asReal(r_aw);
-        if (options.average_window < 0.0) options.average_window = 0.0;
-        if (options.average_window > 1.0) options.average_window = 1.0;
-    }
-
-    SEXP r_af = get_list_element(r_opts, "avg_flat");
-    if (r_af == R_NilValue) r_af = get_list_element(r_opts, "average_flat");
-    if (r_af != R_NilValue && Rf_length(r_af) > 0) {
-        options.average_flat = Rf_asLogical(r_af) ? 1 : 0;
-    }
 
     options.eps_rel = get_opt_double(r_opts, "rel_eps", 1e-3);
     options.max_iter = get_opt_int(r_opts, "max_terms", 10000);
@@ -199,31 +201,15 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
     options.use_fft_precompute = get_opt_bool(r_opts, "precompute", 1);
     options.error_bound = get_opt_bool(r_opts, "error_bound", 1);
 
-    int speedup_opt = get_opt_bool(r_opts, "speedup", 1);
-    const char* engine_str = get_opt_str(r_opts, "engine", speedup_opt ? "speedup" : "standard");
-    if (strcmp(engine_str, "standard") == 0 || strcmp(engine_str, "classic") == 0 || strcmp(engine_str, "main") == 0) {
-        speedup_opt = 0;
-    }
+    int exact_terms = get_opt_bool(r_opts, "exact_terms", 0);
+    int poisson_def = exact_terms ? 0 : 1;
+    options.poisson = get_opt_bool(r_opts, "poisson", poisson_def);
+    options.gamma_newton = get_opt_bool(r_opts, "gamma_newton", 1);
+    options.fast_interval = get_opt_bool(r_opts, "fast_interval", 1);
+    options.fast_exhaustive = get_opt_bool(r_opts, "fast_exhaustive", 1);
+    options.extrapolate = get_opt_int(r_opts, "extrapolate", 2);
 
-    options.poisson = get_opt_bool(r_opts, "poisson", speedup_opt ? 1 : 0);
-    options.gamma_newton = get_opt_bool(r_opts, "gamma_newton", speedup_opt ? 1 : 0);
-    options.fast_interval = get_opt_bool(r_opts, "fast_interval", speedup_opt ? 1 : 0);
-    options.fast_exhaustive = get_opt_bool(r_opts, "fast_exhaustive", speedup_opt ? 1 : 0);
-    options.extrapolate = get_opt_int(r_opts, "extrapolate", speedup_opt ? 2 : 0);
-
-    const char* prec_str = get_opt_str(r_opts, "precision", "double");
-    if (strcmp(prec_str, "double-double") == 0 || strcmp(prec_str, "dd") == 0) {
-        options.fft_precision = FFT_DD;
-    } else if (strcmp(prec_str, "quad") == 0) {
-#if !QUAD_AVAILABLE
-        Rf_warning("multfourier: precision 'quad' no disponible en esta plataforma/compilador; utilizando 'double'.");
-        options.fft_precision = FFT_REAL;
-#else
-        options.fft_precision = FFT_QUAD;
-#endif
-    } else {
-        options.fft_precision = FFT_REAL;
-    }
+    options.fft_precision = FFT_REAL;
     options.gamma_precision = FFT_REAL;
 
     struct timespec t0, t1;
@@ -241,6 +227,8 @@ SEXP c_run_multfourier(SEXP r_x, SEXP r_p, SEXP r_opts) {
     mult_res.n_eff = NA_REAL;
     mult_res.nu_max_ratio = NA_REAL;
     mult_res.status = 0;
+    mult_res.Q = -1;
+    mult_res.DQ_relative = NA_REAL;
 
     multinomial* mult = get_mult(N, K, probs, &options);
     fill_mult1(mult, &mult_res, x0, &options);

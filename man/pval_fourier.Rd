@@ -15,12 +15,9 @@ pval_fourier(
   B = 50,
   max_terms = 10000,
   max_time = NULL,
-  avg_window = 0,
-  avg_flat = FALSE,
   n_threads = min(2L, parallel::detectCores()),
-  precision = c("double", "double-double"),
+  exact_terms = FALSE,
   precompute = TRUE,
-  engine = c("speedup", "standard"),
   verbose = FALSE,
   ...
 )
@@ -70,28 +67,16 @@ sum, than \code{rel_eps / B}. Default 50; \code{B = 0} uses an internal value.}
 \item{max_time}{Optional time limit in seconds. \code{NULL} (default) means no
 limit. When it is reached, \code{status} is 1.}
 
-\item{avg_window}{Fraction (between 0 and 1) of the last partial sums to
-average into the reported value. Default 0 (no averaging). When positive, it
-replaces the extrapolated value of \code{engine = "speedup"}; averaging is a
-linear filter that can bias the result and is usually less accurate than the
-default.}
-
-\item{avg_flat}{Logical; with \code{avg_window > 0}, \code{TRUE} gives equal
-weights and \code{FALSE} (default) weights that grow linearly towards the
-last partial sum.}
-
 \item{n_threads}{Number of threads used to evaluate the series terms (positive
 integer, capped at the number of available cores). Default
 \code{min(2L, parallel::detectCores())}.}
 
-\item{precision}{Floating-point precision of the term evaluator:
-\code{"double"} (default) or \code{"double-double"}. Only used with
-\code{engine = "standard"}; ignored by the default engine.}
+\item{exact_terms}{Logical; if \code{FALSE} (default), evaluates the Fourier
+terms using the fast Poissonised Cauchy-integral evaluator. If \code{TRUE},
+evaluates each term exactly via polynomial convolution.}
 
 \item{precompute}{Logical; if \code{TRUE} (default), precomputes the FFT plan
-of the term evaluator. Only used with \code{engine = "standard"}.}
-
-\item{engine}{\code{"speedup"} (default) or \code{"standard"}. See Details.}
+when evaluating terms via polynomial convolution (\code{exact_terms = TRUE}).}
 
 \item{verbose}{Logical; if \code{TRUE}, prints the partial sums and diagnostic
 information while running. Default \code{FALSE}.}
@@ -100,7 +85,7 @@ information while running. Default \code{FALSE}.}
 \code{print_freq} (how often partial sums are printed when
 \code{verbose = TRUE}; default 100) or \code{extrapolate} (0: no
 extrapolation; 1: report the extrapolated value; 2: also stop on it, the
-default of \code{engine = "speedup"}). Unknown names produce a warning.}
+default). Unknown names produce a warning.}
 }
 \value{
 An object of class \code{"multfourier"}: a list with components
@@ -139,10 +124,13 @@ An object of class \code{"multfourier"}: a list with components
   \item{nu_max_ratio}{Largest size of the late transform values relative to
     the first one; values near 1 mean the terms are not decaying (a lattice-like
     statistic).}
+  \item{Q}{Number of quadrature points (FFT grid size) for the Poissonised
+    evaluator.}
+  \item{D_Q}{Relative aliasing error estimate for \code{Q}.}
 }
-The last four components (\code{err_rel_ext}, \code{err_rel_est},
-\code{n_eff} and \code{nu_max_ratio}) are diagnostics of the series; they are heuristics,
-not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
+The last six components (\code{err_rel_ext}, \code{err_rel_est},
+\code{n_eff}, \code{nu_max_ratio}, \code{Q} and \code{D_Q}) are diagnostics
+of the series. The names \code{Gamma} and \code{Time_gamma} used by earlier
 versions still work, with a deprecation warning.
 }
 \description{
@@ -181,23 +169,19 @@ lattice, the terms do not decay, and the series can fail to
 converge within \code{max_terms} (\code{status = 2}) or even return a negative
 value. In that case use \code{\link{pval_exact}} when it is feasible.
 
-\strong{Stopping rule and reported value.} With \code{engine = "speedup"} the
+\strong{Stopping rule and reported value.} The
 partial sums are accelerated with Wynn's epsilon algorithm (in the safeguarded
 form of QUADPACK's DQELG) and smoothed with a running median of five. The
 series stops as soon as either (i) \code{B} consecutive terms are each smaller
 than \code{rel_eps / B} relative to the partial sum, or (ii) the smoothed
 extrapolated values vary by at most a relative \code{rel_eps} over a trailing
 window covering the last half of the terms. The reported \pvalue{} is the last
-smoothed extrapolated value. With \code{engine = "standard"} only rule (i) is
-used and the reported \pvalue{} is the last partial sum.
+smoothed extrapolated value.
 
-\strong{Engines.} \code{"speedup"} evaluates the terms with a Poissonized
-Cauchy-integral evaluator, chooses the exponential tilt \code{gamma} by a
-Newton saddlepoint search, computes the range of the statistic in closed form,
-and uses the extrapolation described above. \code{"standard"} is the earlier
-implementation: polynomial convolution evaluated by FFT, a grid search for the
-tilt, a dynamic program for the range, and no extrapolation. Both compute the
-same series.
+\strong{Term evaluation.} With \code{exact_terms = FALSE} (default), terms are
+evaluated via a Poissonised Cauchy-integral evaluator, which is significantly
+faster on large instances. With \code{exact_terms = TRUE}, terms are evaluated
+via exact polynomial convolution.
 }
 \examples{
 p <- c(0.1, 0.2, 0.3, 0.4)

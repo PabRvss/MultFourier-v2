@@ -8,7 +8,7 @@ p = P\{T(Y) \ge T(x)\}, \qquad Y \sim \mathrm{Multinomial}(N, p_1, \ldots, p_K),
 $$
 
 for additive test statistics $T$: the log-likelihood ratio $G^2$, Pearson's
-$\mathcal{X}^2$, the Cressie–Read power divergence, and the probability mass
+$\mathcal{X}^2$, the Cressie-Read power divergence, and the probability mass
 function of the multinomial (exact multinomial test). It is aimed at small p-values, far in
 the tail, and at instances whose sample space is too large to sum over.
 
