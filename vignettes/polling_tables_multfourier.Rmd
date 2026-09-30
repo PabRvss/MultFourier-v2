@@ -1,9 +1,9 @@
 ---
-title: "Detecting Unusual Polling-Table Results with MultFourier"
+title: "Detecting Unusual Polling-Station Results with MultFourier"
 author: "Charles Thraves, Pablo Rivas, Felipe Subiabre"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Detecting Unusual Polling-Table Results with MultFourier}
+  %\VignetteIndexEntry{Detecting Unusual Polling-Station Results with MultFourier}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -13,119 +13,162 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
   fig.width = 8,
-  fig.height = 4.8
+  fig.height = 4.8,
+  dpi = 96,
+  fig.retina = 2
 )
+
+# Number format for p-values and relative errors: three decimals when
+# x >= 0.0005, otherwise one decimal times a power of ten (e.g. 3.3 x 10^-4)
+fmt_p <- function(x) {
+  vapply(x, function(v) {
+    if (is.na(v)) return("NA")
+    if (v == 0) return("0")
+    if (abs(v) >= 5e-4) return(sprintf("%.3f", v))
+    e <- floor(log10(abs(v)))
+    m <- round(abs(v) / 10^e, 1)
+    if (m >= 10) { m <- m / 10; e <- e + 1 }
+    sprintf("%s%.1f &times; 10<sup>&minus;%d</sup>", if (v < 0) "&minus;" else "", m, -e)
+  }, character(1))
+}
 ```
 
 # Motivation
 
 This vignette illustrates how `MultFourier` can be used to identify unusual
 outcomes in a collection of multinomial observations. The application analyzes
-results from polling tables belonging to the same polling location in the 2024
-Chilean municipal election.
+results from polling stations belonging to the same polling location in the 2024
+Chilean municipal election. Each polling location (*local de votación*) hosts
+several polling stations (*mesas*), each with its own ballot box and list of
+registered voters.
 
-Within a polling location, registered voters are assigned to polling tables
-approximately according to alphabetical order. If voter surname is unrelated to
+Within a polling location, registered voters are assigned to polling stations
+according to alphabetical order. If voter surname is unrelated to
 political preference, the underlying voting distribution should be broadly
-similar across tables in the same location. This structure provides a natural
+similar across stations in the same polling location. This structure provides a natural
 multinomial goodness-of-fit setting: we can estimate a reference probability
-vector from the remaining tables in the location, and then test whether the
-result observed at a given table is statistically compatible with that null
+vector from the remaining stations in the location, and then test whether the
+result observed at a given station is statistically compatible with that null
 distribution.
 
-# Data: Escuela Centenario, Iquique
+# Data
 
-The example focuses on the **Escuela Centenario** polling location in Iquique.
-This location comprises 15 polling tables, numbered 276 through 290. Most tables
-contain 400 registered voters, while the final two tables are smaller.
+The example focuses on the **Escuela Centenario** polling location in the city of Iquique.
+This location comprises 15 polling stations, numbered 276 through 290. Most stations
+contain 400 registered voters, while the final two stations are smaller.
 
-The vote matrix below records abstention, votes for four mayoral candidates,
-and null or blank votes. Columns correspond to individual polling tables.
+The vote matrix below records votes for four mayoral candidates, null or blank
+votes, and abstention. Columns correspond to individual polling stations.
 
 ```{r data}
 library(MultFourier)
 
 votes <- matrix(
   c(
-    # Abstention
-     96, 101, 173,  94, 106,  88,  96, 104,  88,  98, 109,  92, 104, 57, 50,
     # Candidate A
      37,  34,  31,  34,  37,  37,  35,  32,  40,  37,  37,  38,  36, 22, 25,
     # Candidate B
      39,  37,  36,  36,  26,  29,  28,  39,  39,  34,  28,  32,  35, 15, 27,
     # Candidate C
      99, 107, 110, 108, 127, 107, 108, 125,  89, 100, 109, 103,  98, 74, 70,
+    # Candidate D
+     83,  84,   8,  87,  70, 102,  88,  74,  82,  86,  69,  86,  86, 49, 44,
     # Null and blank votes
      46,  37,  42,  41,  34,  37,  45,  26,  62,  45,  48,  49,  41, 21, 21,
-    # Candidate D
-     83,  84,   8,  87,  70, 102,  88,  74,  82,  86,  69,  86,  86, 49, 44
+    # Abstention
+     96, 101, 173,  94, 106,  88,  96, 104,  88,  98, 109,  92, 104, 57, 50
   ),
   nrow = 6,
   byrow = TRUE
 )
 
 rownames(votes) <- c(
-  "Abstention",
   "Candidate A",
   "Candidate B",
   "Candidate C",
+  "Candidate D",
   "Null/blank",
-  "Candidate D"
+  "Abstention"
 )
 
 colnames(votes) <- as.character(276:290)
 
-table_sizes <- colSums(votes)
-table_sizes
+polling_station_sizes <- colSums(votes)
+polling_station_sizes
 ```
 
-The first 13 tables have exactly 400 registered voters each ($N_m = 400$),
-while tables 289 and 290 have 238 and 237 voters, respectively.
+The first 13 stations have exactly 400 registered voters each ($N_m = 400$),
+while stations 289 and 290 have 238 and 237 voters, respectively.
 
 # Visual Inspection
 
-Because table sizes differ slightly, proportions provide a fairer visual
-comparison than raw counts.
+Because station sizes differ slightly, proportions provide a fairer visual
+comparison than raw counts. Each cell shows the percentage of votes.
 
-```{r heatmap, fig.cap = "Vote proportions by polling table at Escuela Centenario."}
-prop <- sweep(votes, 2, table_sizes, "/")
+```{r heatmap, fig.cap = "Vote proportions by polling station at Escuela Centenario."}
+prop <- sweep(votes, 2, polling_station_sizes, "/")
 
 heat_data <- as.data.frame(as.table(prop))
-names(heat_data) <- c("Option", "Table", "Proportion")
+names(heat_data) <- c("Option", "Station", "Proportion")
+
+# Cell labels: percentage with one decimal, in white on dark cells
+heat_data$Label <- sprintf("%.1f", 100 * heat_data$Proportion)
+dark_cell <- heat_data$Proportion > min(prop) + 0.55 * diff(range(prop))
+heat_data$TextColor <- ifelse(dark_cell, "white", "black")
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   ggplot2::ggplot(
     heat_data,
-    ggplot2::aes(x = Table, y = Option, fill = Proportion)
+    ggplot2::aes(x = Station, y = Option, fill = Proportion)
   ) +
     ggplot2::geom_tile(color = "white", linewidth = 0.25) +
-    ggplot2::scale_fill_gradient(low = "white", high = "black") +
+    ggplot2::geom_text(
+      ggplot2::aes(label = Label, color = TextColor),
+      size = 2.6
+    ) +
+    ggplot2::scale_color_identity() +
+    ggplot2::scale_fill_distiller(
+      palette = "YlOrRd",
+      direction = 1,
+      labels = function(x) paste0(100 * x, "%")
+    ) +
+    ggplot2::scale_y_discrete(limits = rev(rownames(votes))) +
     ggplot2::labs(
-      x = "Polling table",
+      x = "Polling station",
       y = NULL,
-      fill = "Proportion"
+      fill = "Vote proportion"
     ) +
     ggplot2::theme_minimal(base_size = 11) +
     ggplot2::theme(
       panel.grid = ggplot2::element_blank(),
-      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)
+      axis.text.x = ggplot2::element_text(angle = 0, hjust = 0.5)
     )
 } else {
-  heatmap(
-    prop,
-    Rowv = NA,
-    Colv = NA,
-    scale = "none",
-    margins = c(5, 10),
-    xlab = "Polling table",
+  # Rows reversed so that Candidate A appears at the top
+  z <- t(prop[rev(rownames(prop)), , drop = FALSE])
+  op <- par(mar = c(5, 8, 2, 2))
+  image(
+    seq_len(nrow(z)), seq_len(ncol(z)), z,
+    col = hcl.colors(100, "YlOrRd", rev = TRUE),
+    axes = FALSE,
+    xlab = "Polling station",
     ylab = ""
   )
+  axis(1, at = seq_len(nrow(z)), labels = rownames(z), las = 1)
+  axis(2, at = seq_len(ncol(z)), labels = colnames(z), las = 1)
+  lab <- matrix(sprintf("%.1f", 100 * z), nrow = nrow(z))
+  dark <- z > min(z) + 0.55 * diff(range(z))
+  text(
+    rep(seq_len(nrow(z)), ncol(z)), rep(seq_len(ncol(z)), each = nrow(z)),
+    lab, cex = 0.6, col = ifelse(dark, "white", "black")
+  )
+  par(op)
 }
 ```
 
-Inspection of the heatmap highlights **Table 278**:
+Inspection of the heatmap highlights **Station 278**:
 Candidate D received only 8 votes (2%), compared with 70–100 votes
-(17%–25%) in neighboring tables, while abstention was markedly higher (173 votes).
+(17%–25%) in neighboring stations, while abstention was markedly higher (173 votes).
 
 While visually salient, graphical inspection alone does not quantify how
 statistically improbable this outcome is under the multinomial model.
@@ -133,10 +176,10 @@ statistically improbable this outcome is under the multinomial model.
 # Leave-One-Out Reference Distribution
 
 Let $X_m = (X_{m1}, \ldots, X_{mK})$ denote the vector of observed counts at
-table $m$, with total sample size $N_m = \sum_{k=1}^K X_{mk}$.
+station $m$, with total sample size $N_m = \sum_{k=1}^K X_{mk}$.
 
-To evaluate whether table $m$ is compatible with the location as a whole without
-allowing an anomalous table to contaminate its own reference distribution, we
+To evaluate whether station $m$ is compatible with the location as a whole without
+allowing an anomalous station to contaminate its own reference distribution, we
 estimate the null probability vector using a **leave-one-out** scheme:
 
 \[
@@ -146,7 +189,7 @@ estimate the null probability vector using a **leave-one-out** scheme:
 \qquad k = 1, \ldots, K.
 \]
 
-Under this formulation, table $m$ contributes zero weight to its own reference
+Under this formulation, station $m$ contributes zero weight to its own reference
 vector $\widehat{\mathbf{p}}^{(-m)}$.
 
 ```{r loo-probabilities}
@@ -161,17 +204,44 @@ loo_p <- sapply(
 rownames(loo_p) <- rownames(votes)
 colnames(loo_p) <- colnames(votes)
 
-# Reference distribution for table 278
+# Reference distribution for station 278
 round(loo_p[, "278"], 4)
 ```
 
-# Detailed Analysis of Table 278: Evaluating Support and Routing
+# Detailed Analysis of Station 278
 
-For table 278, the null hypothesis posits:
+We model the counts at station 278 as
 
 \[
-X_{278} \sim \mathrm{Multinomial}\left(N_{278} = 400, \; \widehat{\mathbf{p}}^{(-278)}\right).
+X_{278} \sim \mathrm{Multinomial}\left(N_{278} = 400, \; \boldsymbol{\pi}\right),
 \]
+
+and test whether the vote shares $\boldsymbol{\pi}$ at this station match those
+of the rest of the location:
+
+\[
+\begin{aligned}
+H_0 &: \; \boldsymbol{\pi} = \widehat{\mathbf{p}}^{(-278)}, \\
+H_1 &: \; \boldsymbol{\pi} \neq \widehat{\mathbf{p}}^{(-278)}.
+\end{aligned}
+\]
+
+We use the log-likelihood ratio statistic, which measures how far the observed
+vote shares are from the reference shares:
+
+\[
+G^2(x) = 2 \sum_{k=1}^{K} x_k \ln\left(\frac{x_k}{N_{278}\, \widehat p_k^{(-278)}}\right),
+\]
+
+where $x = (x_1, \ldots, x_K)$ are the observed counts and terms with $x_k = 0$
+are taken as zero. The $p$-value is the probability, under $H_0$, of a value of
+the statistic at least as large as the observed one:
+
+\[
+p = \mathbb{P}_{H_0}\left(G^2(X_{278}) \ge G^2(x)\right).
+\]
+
+Other statistics are compared in a later section.
 
 We first compare observed counts with expected counts under $\widehat{\mathbf{p}}^{(-278)}$:
 
@@ -179,113 +249,191 @@ We first compare observed counts with expected counts under $\widehat{\mathbf{p}
 comparison_278 <- data.frame(
   Option = rownames(votes),
   Observed = votes[, "278"],
-  Expected = round(table_sizes["278"] * loo_p[, "278"], 1),
-  Difference = round(votes[, "278"] - table_sizes["278"] * loo_p[, "278"], 1),
+  Expected = round(polling_station_sizes["278"] * loo_p[, "278"], 1),
+  Difference = round(votes[, "278"] - polling_station_sizes["278"] * loo_p[, "278"], 1),
   row.names = NULL
 )
 
 knitr::kable(
   comparison_278,
-  caption = "Observed vs. expected counts for Polling Table 278."
+  format = "html",
+  escape = FALSE,
+  align = "l",
+  caption = "Observed vs. expected counts for Polling Station 278."
 )
 ```
 
-To compute the exact multinomial $p$-value, `MultFourier` provides `pval_flexible()`,
-which dynamically inspects the cardinality of the multinomial support:
+## Fourier inversion: `pval_fourier()`
 
-\[
-\text{Support Size} = \binom{N + K - 1}{K - 1} = \binom{400 + 6 - 1}{6 - 1} = \binom{405}{5} = 88,978,137,003 \approx 8.9 \times 10^{10}.
-\]
+The main method of `MultFourier` is `pval_fourier()`. It writes the exact
+$p$-value as a Fourier series and sums it until a stopping rule is met. The
+partial sums are accelerated by extrapolation, and the summation stops as soon
+as either `B` consecutive terms are each smaller than `rel_eps / B` relative to
+the partial sum, or the extrapolated values vary by at most a relative
+`rel_eps` over the last half of the terms. Throughout this vignette we use
+`B = 50` (the default) and `rel_eps = 1e-6`, tighter than the default `1e-3`:
+on these data it lowers the relative error by about two orders of magnitude, at
+the cost of a few thousand terms instead of a few hundred. The result is still an
+approximation whose accuracy depends on how fast the series converges;
+`rel_eps` sets how stable the sum must be, not a bound on its error.
 
-Because the support exceeds the tractability cutoff ($\log_{10}(\text{support}) \approx 10.95 > 7.4$, corresponding to approximately 1 second of computation), exact enumeration via `pval_exhaustive()` over 89 billion outcomes would require hours of CPU time. Consequently, `pval_flexible()` automatically routes the calculation to the Fourier series inversion method (`pval_fourier()`):
-
-```{r flexible-278}
-fit_278 <- pval_flexible(
+```{r fourier-278}
+fit_278 <- pval_fourier(
   x = votes[, "278"],
-  p = loo_p[, "278"]
+  p = loo_p[, "278"],
+  rel_eps = 1e-6
 )
 
 fit_278
 ```
 
-The returned `multfourier` object provides direct access to all summary fields:
-* `fit_278$pval`: computed $p$-value ($\approx 9.20 \times 10^{-33}$).
+The returned `multfourier` object is a list; its main fields are:
+
+* `fit_278$pval`: computed $p$-value
+  ($\approx$ `r fmt_p(fit_278$pval)`).
 * `fit_278$stat`: test statistic used (`"Log-Likelihood Ratio"`).
-* `fit_278$n_terms`: number of Fourier expansion terms evaluated (converged in 206 terms under `speedup`).
-* `fit_278$time`: total execution time in seconds ($\approx 0.08$ s).
-* `fit_278$method`: computational method selected (`"fourier"`).
-* `fit_278$status`: completion status ID (`0` indicates full convergence).
+* `fit_278$n_terms`: number of Fourier series terms evaluated
+  (`r fit_278$n_terms` here).
+* `fit_278$time`: total execution time in seconds
+  (`r format(fit_278$time, digits = 2)` s here).
+* `fit_278$method`: computational method used (`"fourier"`).
+* `fit_278$status`: completion status ID (`0` indicates that the stopping rule
+  was met).
 
-The resulting $p$-value on the order of $10^{-33}$ rigorously confirms that the
-observed pattern at table 278 is extraordinarily unlikely under the null model.
+The remaining fields (the exponential tilt `gamma`, the period half-width `W`
+and four convergence diagnostics such as `err_rel_ext`) are described in
+`?pval_fourier`.
 
-# Validation: Comparing Fourier Inversion and Exact Enumeration
+A $p$-value of order $10^{-33}$ indicates that the pattern observed at station 278
+would be extremely unlikely under the null model.
 
-To demonstrate that `pval_fourier()` and `pval_exhaustive()` produce virtually
-identical results when exact enumeration is computationally tractable, we evaluate
-a downscaled validation sample. By scaling the table counts by a factor of 15
-($N \approx 25$ voters per table), the support cardinality drops to:
+## Exact computation: `pval_exact()`
+
+The multinomial support for station 278 contains
 
 \[
-\binom{27 + 6 - 1}{6 - 1} = \binom{32}{5} = 201,376 \text{ outcomes},
+\binom{N + K - 1}{K - 1} = \binom{400 + 6 - 1}{6 - 1} = \binom{405}{5} = 88,978,137,003 \approx 8.9 \times 10^{10}
 \]
 
-a regime where both `pval_exhaustive()` and `pval_fourier()` execute across all
-15 tables in a fraction of a second.
+outcomes. `pval_exact()` does not enumerate them one by one. It first computes, by dynamic programming, the smallest and largest value
+that the remaining part of the statistic can take for every number of categories
+and voters still to be assigned. It then assigns the counts one category at a
+time. When these bounds show that every completion of a partial assignment is
+at least as extreme as the observed outcome, the probability of that whole
+branch is added at once; when they show that none is, the branch is discarded.
+Only branches that can fall on either side of the observed value are explored
+further. The result is the exact $p$-value, and the computation remains feasible
+here even though the support is large:
 
-```{r validation-benchmark}
-# Downscale counts to a moderate support regime (N ~ 25)
-votes_val <- round(votes / 15)
+```{r exact-278}
+exact_fit_278 <- pval_exact(
+  x = votes[, "278"],
+  p = loo_p[, "278"]
+)
 
-p_fourier_val <- sapply(colnames(votes_val), function(m) {
-  pval_fourier(votes_val[, m], loo_p[, m], engine = "speedup")$pval
+exact_fit_278$pval
+```
+
+On two threads (the default) it takes `r format(exact_fit_278$time, digits = 2)` s,
+against `r format(fit_278$time, digits = 2)` s for `pval_fourier()`, and the
+relative difference between the two $p$-values is
+`r fmt_p(abs(fit_278$pval / exact_fit_278$pval - 1))`.
+The number of branches that must be explored, and hence the cost of
+`pval_exact()`, still grows quickly with the number of categories $K$ and
+the sample size $N$, which is where `pval_fourier()` is needed.
+
+## Automatic choice: `pval_flexible()`
+
+`pval_flexible()` chooses between the two methods based on the size of the
+support: below a cutoff of $\log_{10}(\text{support}) = 10$ it computes the
+exact $p$-value, and above it uses Fourier inversion. The cutoff is deliberately
+conservative, because the cost of `pval_exact()` depends on the observed counts
+and is highest for extreme outcomes like this one. For station 278,
+$\log_{10}(\text{support}) \approx 10.95$, so it uses `pval_fourier()`:
+
+```{r flexible-278}
+pval_flexible(
+  x = votes[, "278"],
+  p = loo_p[, "278"],
+  rel_eps = 1e-6
+)$method
+```
+
+# Screening All Polling Stations
+
+We now apply `pval_fourier()` to all 15 stations in Escuela Centenario, each
+against its own leave-one-out reference vector, and check its results against
+the exact $p$-values from `pval_exact()`. The data are used as they are,
+so the comparison covers the instance actually being analyzed, including the
+extreme tail at station 278.
+
+Because the $p$-values span more than 30 orders of magnitude, we compare the
+two methods through the relative error $|\hat p_{\text{Fourier}} / p_{\text{Exact}} - 1|$
+rather than the absolute difference, which would be uninformative for small
+$p$-values.
+
+```{r screening}
+p_fourier_all <- sapply(colnames(votes), function(m) {
+  pval_fourier(votes[, m], loo_p[, m], rel_eps = 1e-6)$pval
 })
 
-p_exhaustive_val <- sapply(colnames(votes_val), function(m) {
-  pval_exhaustive(votes_val[, m], loo_p[, m], engine = "speedup")$pval
+p_exact_all <- sapply(colnames(votes), function(m) {
+  # Station 278 was already computed above
+  if (m == "278") return(exact_fit_278$pval)
+  pval_exact(votes[, m], loo_p[, m])$pval
 })
 
-val_comparison <- data.frame(
-  Table = colnames(votes_val),
-  N = colSums(votes_val),
-  p_Fourier = format(p_fourier_val, scientific = TRUE, digits = 4),
-  p_Exhaustive = format(p_exhaustive_val, scientific = TRUE, digits = 4),
-  Abs_Diff = format(abs(p_fourier_val - p_exhaustive_val), scientific = TRUE, digits = 3),
+rel_err_all <- abs(p_fourier_all / p_exact_all - 1)
+
+screening <- data.frame(
+  Station = colnames(votes),
+  Voters = polling_station_sizes,
+  p_Fourier = fmt_p(p_fourier_all),
+  p_Exact = fmt_p(p_exact_all),
+  Rel_Error = fmt_p(rel_err_all),
   row.names = NULL
 )
 
 knitr::kable(
-  val_comparison,
-  caption = "Comparison of p-values: Fourier inversion vs. exact enumeration (Speedup engine)."
+  screening,
+  format = "html",
+  escape = FALSE,
+  align = "l",
+  caption = "Leave-one-out p-values for all stations (LLR statistic): Fourier inversion vs. exact computation."
 )
 ```
 
-The absolute differences across all tables remain below $0.004$, confirming the
-mathematical agreement between the two algorithms.
+The largest relative error across the 15 stations is
+`r fmt_p(max(rel_err_all))`, at station
+`r names(which.max(rel_err_all))`. At station 278, where
+$p \approx$ `r fmt_p(p_exact_all["278"])`,
+the relative error is `r fmt_p(rel_err_all["278"])`.
+Note that `rel_eps` controls the stopping rule, not the error: the observed
+relative errors can exceed it.
 
-We can plot both profiles together to visually demonstrate their concordance:
+On a $-\log_{10}(p)$ scale, where higher values indicate stronger evidence
+against the reference distribution, the two methods give the same profile:
 
-```{r validation-plot, fig.cap = "Validation comparison: Fourier inversion vs. exact enumeration across polling tables."}
-val_plot_data <- data.frame(
-  Table = rep(as.integer(colnames(votes_val)), 2),
-  Method = rep(c("Fourier (speedup)", "Exhaustive (speedup)"), each = ncol(votes_val)),
-  p_value = c(p_fourier_val, p_exhaustive_val)
+```{r screening-plot, fig.cap = "Leave-one-out -log10(p) across polling stations (LLR): Fourier inversion vs. exact computation."}
+screening_plot_data <- data.frame(
+  Station = rep(as.integer(colnames(votes)), 2),
+  Method = rep(c("Fourier (pval_fourier)", "Exact (pval_exact)"), each = ncol(votes)),
+  neg_log10_p = -log10(c(p_fourier_all, p_exact_all))
 )
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   ggplot2::ggplot(
-    val_plot_data,
-    ggplot2::aes(x = Table, y = p_value, color = Method, shape = Method, linetype = Method)
+    screening_plot_data,
+    ggplot2::aes(x = Station, y = neg_log10_p, color = Method, shape = Method, linetype = Method)
   ) +
     ggplot2::geom_line(linewidth = 0.7) +
     ggplot2::geom_point(size = 2.5) +
     ggplot2::scale_x_continuous(breaks = 276:290) +
-    ggplot2::scale_color_manual(values = c("Fourier (speedup)" = "#1f77b4", "Exhaustive (speedup)" = "#ff7f0e")) +
+    ggplot2::scale_color_manual(values = c("Fourier (pval_fourier)" = "#1f77b4", "Exact (pval_exact)" = "#ff7f0e")) +
     ggplot2::labs(
-      title = "Validation Benchmark: Fourier Inversion vs. Exact Enumeration",
-      subtitle = "Downscaled sample size (N ~ 25, support size ~ 200,000 outcomes)",
-      x = "Polling Table",
-      y = "p-value",
+      title = "LLR p-values by polling station at Escuela Centenario",
+      x = "Polling station",
+      y = expression(-log[10](p)),
       color = "Method",
       shape = "Method",
       linetype = "Method"
@@ -295,97 +443,90 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 } else {
   matplot(
     276:290,
-    cbind(p_fourier_val, p_exhaustive_val),
+    -log10(cbind(p_fourier_all, p_exact_all)),
     type = "b",
     pch = c(19, 17),
     col = c("blue", "orange"),
     lty = c(1, 2),
-    xlab = "Polling table",
-    ylab = "p-value",
+    xlab = "Polling station",
+    ylab = expression(-log[10](p)),
     xaxt = "n",
-    main = "Validation Benchmark: Fourier vs. Exact Enumeration"
+    main = "LLR p-values by polling station at Escuela Centenario"
   )
   axis(1, at = 276:290, labels = 276:290)
-  legend("topright", legend = c("Fourier (speedup)", "Exhaustive (speedup)"),
+  legend("topright", legend = c("Fourier (pval_fourier)", "Exact (pval_exact)"),
          col = c("blue", "orange"), pch = c(19, 17), lty = c(1, 2), bty = "n")
 }
 ```
 
-Both methods clearly detect the anomaly at Table 278 while producing identical
-trajectories across all tables.
-
-# Full-Scale Screening of All Polling Tables (N = 400)
-
-Having verified the exactness of `pval_fourier()` against the ground truth of
-`pval_exhaustive()`, we now evaluate all 15 tables of Escuela Centenario at full
-scale ($N = 400$). At this realistic scale, combinatorial enumeration is intractable,
-but `pval_fourier()` completes the entire screening in approximately 1 second:
-
-We now iterate over all 15 tables in Escuela Centenario. Each table is evaluated
-against its own leave-one-out reference distribution:
-
-```{r all-tables-llr}
-p_llr <- sapply(
-  colnames(votes),
-  function(m) {
-    fit <- pval_fourier(x = votes[, m], p = loo_p[, m])
-    fit$pval
-  }
-)
-
-results_llr <- data.frame(
-  Table = colnames(votes),
-  Voters = table_sizes,
-  p_value = format(p_llr, scientific = TRUE, digits = 4),
-  row.names = NULL
-)
-
-knitr::kable(
-  results_llr,
-  caption = "Leave-one-out multinomial p-values across all tables (LLR statistic)."
-)
+```{r llr-ranking, include = FALSE}
+p_sorted <- sort(p_exact_all)
 ```
 
-We can visualize the results on a $-\log_{10}(p)$ scale, where higher values
-indicate greater discrepancy with the reference distribution:
-
-```{r pvalue-plot, fig.cap = "Leave-one-out -log10(p) across polling tables (LLR)."}
-# Floor at 1e-35 to maintain a clean graphical scale for extreme tails
-neg_log10_p <- -log10(pmax(p_llr, 1e-35))
-
-plot(
-  as.integer(names(p_llr)),
-  neg_log10_p,
-  type = "b",
-  pch = 19,
-  col = "black",
-  xlab = "Polling table",
-  ylab = expression(-log[10](p)),
-  xaxt = "n",
-  main = "Escuela Centenario: Anomaly Profile"
-)
-axis(1, at = as.integer(names(p_llr)), labels = names(p_llr))
-abline(h = -log10(0.05 / 15), lty = 2, col = "red") # Bonferroni threshold
-text(285, -log10(0.05 / 15) + 1.5, "Bonferroni threshold (alpha = 0.05)", col = "red", cex = 0.85)
-```
-
-Table 278 exhibits an astronomical signal ($-\log_{10}(p) \approx 32$), whereas
-all other tables remain within typical sampling variability.
+Station 278 stands out: its $p$-value is about
+`r round(log10(p_sorted[2] / p_sorted[1]))` orders of magnitude smaller than
+that of any other station (the next smallest is station
+`r names(p_sorted)[2]`, with $p \approx$
+`r fmt_p(p_sorted[2])`).
 
 # Comparing Multinomial Test Statistics
 
-`MultFourier` supports several classic statistics to partition and order the
-multinomial sample space:
+`MultFourier` supports several classic statistics. All of them test the same
+hypotheses $H_0$ and $H_1$ stated above for station 278; they differ in how
+they order the possible outcomes from least to most extreme, and therefore in
+which outcomes count as "at least as extreme" as the observed one.
 
-1. **Probability Mass Function (`"pmf"`)**: The exact multinomial point mass
-   $\mathbb{P}(X = x)$. Outcomes with probability less than or equal to the
-   observed outcome form the rejection region.
-2. **Pearson's Chi-Square (`"chi2"`)**: Standard $\sum (O_k - E_k)^2 / E_k$ discrepancy.
-3. **Log-Likelihood Ratio (`"llr"`)**: $G^2 = 2 \sum O_k \ln(O_k / E_k)$, standard for
-   likelihood ratio tests.
-4. **Power-Divergence Family (`"pd"`)**: Cressie & Read (1984) family parameterized
-   by $\lambda \in \mathbb{R}$. We use $\lambda = 2/3$, a recommended choice
-   balancing Pearson ($\lambda = 1$) and LLR ($\lambda \to 0$).
+For a station with observed counts $x = (x_1, \ldots, x_K)$, total
+$N = \sum_k x_k$ and null probabilities $p = (p_1, \ldots, p_K)$ (here
+$\widehat{\mathbf{p}}^{(-m)}$), the multinomial sample space is
+
+\[
+\Omega_N = \left\{ y \in \{0, 1, \ldots, N\}^K : \sum_{k=1}^{K} y_k = N \right\},
+\]
+
+and the probability of an outcome $y \in \Omega_N$ under $H_0$ is
+
+\[
+P(y) = \frac{N!}{y_1! \cdots y_K!} \prod_{k=1}^{K} p_k^{y_k}.
+\]
+
+For a statistic $T$ in which larger values are more extreme, the $p$-value is
+
+\[
+p = \sum_{y \in \Omega_N} P(y) \, \mathbf{1}\left\{ T(y) \ge T(x) \right\}.
+\]
+
+**Probability Mass Function (`"pmf"`).** Outcomes are ordered by their own
+probability under $H_0$: an outcome is at least as extreme as $x$ when it is at
+most as probable. The $p$-value is
+
+\[
+p_{\text{PMF}} = \sum_{y \in \Omega_N} P(y) \, \mathbf{1}\left\{ P(y) \le P(x) \right\}.
+\]
+
+**Pearson's Chi-Square (`"chi2"`).** Outcomes are ordered by the squared
+distance between observed and expected counts, scaled by the expected counts:
+
+\[
+\mathcal{X}^2(y) = \sum_{k=1}^{K} \frac{(y_k - N p_k)^2}{N p_k},
+\qquad
+p_{\mathcal{X}^2} = \sum_{y \in \Omega_N} P(y) \, \mathbf{1}\left\{ \mathcal{X}^2(y) \ge \mathcal{X}^2(x) \right\}.
+\]
+
+**Log-Likelihood Ratio (`"llr"`).** The statistic $G^2$ defined above for
+station 278, with $p_{G^2}$ given by the same formula with $T = G^2$.
+
+**Power Divergence (`"pd"`).** The family of Cressie and Read (1984), indexed
+by a real parameter $\lambda$:
+
+\[
+2 I^{\lambda}(y) = \frac{2}{\lambda(\lambda + 1)} \sum_{k=1}^{K} y_k \left[ \left( \frac{y_k}{N p_k} \right)^{\lambda} - 1 \right],
+\qquad \lambda \neq 0, -1,
+\]
+
+with the values at $\lambda = 0$ and $\lambda = -1$ defined as limits. The
+family contains Pearson's statistic ($\lambda = 1$) and the log-likelihood
+ratio ($\lambda \to 0$). We use $\lambda = 2/3$, which lies between the two.
 
 ```{r compare-tests}
 test_specs <- list(
@@ -395,108 +536,121 @@ test_specs <- list(
   "Power Divergence (2/3)"= list(stat = "pd", lambda = 2/3)
 )
 
-p_by_test <- sapply(
+# Run a p-value function on station m with the statistic described by spec
+run_test <- function(fun, m, spec, ...) {
+  args <- list(x = votes[, m], p = loo_p[, m], stat = spec$stat, ...)
+  if (!is.null(spec$lambda)) args$lambda <- spec$lambda
+  do.call(fun, args)
+}
+
+fits_by_test <- lapply(
   test_specs,
-  function(spec) {
-    sapply(
-      colnames(votes),
-      function(m) {
-        args <- list(x = votes[, m], p = loo_p[, m], stat = spec$stat)
-        if (!is.null(spec$lambda)) args$lambda <- spec$lambda
-        fit <- do.call(pval_fourier, args)
-        fit$pval
-      }
-    )
-  }
+  function(spec) lapply(colnames(votes), function(m) run_test(pval_fourier, m, spec, rel_eps = 1e-6))
 )
 
+p_by_test <- sapply(fits_by_test, function(fits) sapply(fits, `[[`, "pval"))
+status_by_test <- sapply(fits_by_test, function(fits) sapply(fits, `[[`, "status"))
+rownames(p_by_test) <- rownames(status_by_test) <- colnames(votes)
+
+# A dagger marks results where the series did not converge
+p_display <- matrix(fmt_p(p_by_test), nrow = nrow(p_by_test), dimnames = dimnames(p_by_test))
+p_display[status_by_test != 0] <- paste0(p_display[status_by_test != 0], " †")
+
 comparison <- data.frame(
-  Table = colnames(votes),
-  round(p_by_test, 4),
+  Station = colnames(votes),
+  p_display,
   check.names = FALSE,
   row.names = NULL
 )
 
 knitr::kable(
   comparison,
-  caption = "Leave-one-out p-values across different test statistics."
+  format = "html",
+  escape = FALSE,
+  align = "l",
+  caption = "Leave-one-out p-values across different test statistics (Fourier inversion). † marks results where the series did not converge (status != 0)."
 )
 ```
 
-Notice that for typical tables (e.g. 276, 277, 282, 285), all statistics yield
-comparable $p$-values. For table 278, every statistic produces a $p$-value
-essentially equal to zero ($\le 10^{-13}$), showing that the detection of the
-anomaly is completely robust to the choice of statistic.
+For typical stations (e.g. 276, 277, 282, 285), all statistics yield comparable
+$p$-values. Cells marked † are those where `pval_fourier()` reached its limit
+of `max_terms` terms without meeting its convergence criterion
+(`status != 0`), so the value shown there is not reliable. This happens for
+Pearson's chi-square at stations
+`r paste(rownames(status_by_test)[status_by_test[, "Pearson (Chi2)"] != 0], collapse = ", ")`,
+and for the power divergence with $\lambda = 2/3$ at station
+`r paste(rownames(status_by_test)[status_by_test[, "Power Divergence (2/3)"] != 0], collapse = ", ")`;
+PMF and LLR converge at every station. The table below compares, for station 278, the Fourier result
+of each statistic with the exact $p$-value computed by `pval_exact()`:
 
-```{r compare-tests-plot, fig.cap = "Comparison of -log10(p) across different test statistics."}
-plot_data <- data.frame(
-  Table   = rep(as.integer(colnames(votes)), times = ncol(p_by_test)),
-  Test    = rep(colnames(p_by_test), each = nrow(p_by_test)),
-  p_value = as.vector(p_by_test)
+```{r compare-tests-278}
+exact_278 <- sapply(
+  test_specs,
+  function(spec) run_test(pval_exact, "278", spec)$pval
 )
 
-# Display transform floored at 1e-35 for visual clarity
-plot_data$neg_log10_p <- -log10(pmax(plot_data$p_value, 1e-35))
+fourier_278 <- lapply(fits_by_test, function(fits) fits[[which(colnames(votes) == "278")]])
 
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-  ggplot2::ggplot(
-    plot_data,
-    ggplot2::aes(
-      x = Table,
-      y = neg_log10_p,
-      color = Test,
-      shape = Test,
-      linetype = Test
-    )
-  ) +
-    ggplot2::geom_line(linewidth = 0.6) +
-    ggplot2::geom_point(size = 2.2) +
-    ggplot2::scale_x_continuous(breaks = 276:290) +
-    ggplot2::labs(
-      x = "Polling table",
-      y = expression(-log[10](p)),
-      color = "Test Statistic",
-      shape = "Test Statistic",
-      linetype = "Test Statistic"
-    ) +
-    ggplot2::theme_minimal(base_size = 11) +
-    ggplot2::theme(legend.position = "bottom")
-} else {
-  matplot(
-    276:290,
-    matrix(plot_data$neg_log10_p, ncol = ncol(p_by_test)),
-    type = "b",
-    pch = 1:4,
-    lty = 1:4,
-    xlab = "Polling table",
-    ylab = expression(-log[10](p)),
-    xaxt = "n"
-  )
-  axis(1, at = 276:290, labels = 276:290)
-  legend("topright", legend = colnames(p_by_test), pch = 1:4, lty = 1:4, bty = "n")
-}
+comparison_278 <- data.frame(
+  Statistic = names(test_specs),
+  p_Fourier = fmt_p(sapply(fourier_278, `[[`, "pval")),
+  Terms = sapply(fourier_278, `[[`, "n_terms"),
+  Status = sapply(fourier_278, `[[`, "status"),
+  p_Exact = fmt_p(exact_278),
+  row.names = NULL
+)
+
+knitr::kable(
+  comparison_278,
+  format = "html",
+  escape = FALSE,
+  align = "l",
+  caption = "Station 278: Fourier inversion vs. exact p-values for each statistic."
+)
 ```
+
+At this station, for PMF and LLR the Fourier series converges
+(`r fourier_278[["PMF"]]$n_terms` and `r fourier_278[["Log-Likelihood Ratio"]]$n_terms` terms)
+and agrees with the exact value. For Pearson's chi-square and the power divergence it
+does not converge, and raising `max_terms` does not fix this: with 100,000
+terms the chi-square result even becomes negative. The reason is structural.
+Pearson's statistic is $\mathcal{X}^2 = \sum_k x_k^2 / (N p_k) - N$ with integer counts
+$x_k$, so its values lie close to a lattice; the terms of the Fourier series
+then recur instead of cancelling, and the truncated sum does not settle. The
+power divergence with $\lambda = 2/3$ behaves similarly at this station. In
+practice, check the `status` of every `pval_fourier()` result. When it is not
+0, use `pval_exact()` if the instance is tractable, or a statistic such as
+LLR or PMF, for which the series converges.
+
+Using the exact values for the two non-converged cells, all four statistics
+flag station 278, with $p$-values between
+`r fmt_p(min(exact_278))` and
+`r fmt_p(max(exact_278))`. At this station, the
+detection of the anomaly does not depend on the statistic, although the size of the $p$-value
+varies by about `r round(diff(log10(range(exact_278))))` orders of magnitude.
 
 # Methodological Scope and Limitations
 
-When interpreting these results, two methodological aspects must be kept in mind:
+When interpreting these results, three methodological aspects must be kept in mind:
 
 1. **Plug-in estimation**: The leave-one-out probability vector $\widehat{\mathbf{p}}^{(-m)}$
    is estimated from data and then treated as known by `pval_fourier()`. The resulting
    numbers should strictly be interpreted as **plug-in goodness-of-fit $p$-values**.
-2. **Nature of the anomaly**: A vanishingly small $p$-value indicates that table 278
-   is highly incompatible with the assumption that all tables share a common multinomial
+2. **Nature of the anomaly**: A vanishingly small $p$-value indicates that station 278
+   is highly incompatible with the assumption that all stations share a common multinomial
    distribution. It does **not** identify the cause of the discrepancy (e.g. data-entry
    error, transcription error, or genuine localized demographic differences).
-3. **Multiple testing**: When screening many tables simultaneously, family-wise error
-   rate or false discovery rate corrections (e.g. Bonferroni or Benjamini-Hochberg)
-   should be applied.
+3. **Multiple testing**: When screening many stations, a multiple-testing correction
+   (e.g. Bonferroni or Benjamini-Hochberg) should be applied over the full set of
+   stations screened. For station 278 the conclusion does not depend on it: even a
+   Bonferroni correction over tens of thousands of stations gives a threshold of
+   order $10^{-6}$, far above $p \approx 10^{-33}$.
 
 # Summary
 
-This example demonstrates a clean workflow for analyzing grouped multinomial counts:
+This example demonstrates a workflow for analyzing grouped multinomial counts:
 
-1. **Visualize** proportions across groups to detect macroscopic deviations.
+1. **Visualize** proportions across groups to detect visible deviations.
 2. **Construct** leave-one-out reference probabilities to prevent circular influence.
-3. **Compute** exact multinomial $p$-values using `pval_fourier()`.
-4. **Compare** multiple statistics (`"llr"`, `"pmf"`, `"chi2"`, `"pd"`) to confirm robustness.
+3. **Compute** multinomial $p$-values using `pval_fourier()`, checking its `status` and falling back to `pval_exact()` when the series does not converge.
+4. **Compare** multiple statistics (`"llr"`, `"pmf"`, `"chi2"`, `"pd"`) to check that the conclusion does not depend on the choice of statistic.

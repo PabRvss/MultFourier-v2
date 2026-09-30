@@ -2,3 +2,6 @@
 ^\.Rproj\.user$
 ^MultFourier\.pdf$
 ^tests\.R$
+^Rplots\.pdf$
+^benchmark_ExactMultinom\.R$
+^benchmark_runtime_comparison\.png$

@@ -7,13 +7,29 @@
 \method{print}{multfourier}(x, ...)
 }
 \arguments{
-\item{x}{Object of class \code{"multfourier"} returned by \code{pval_fourier}, \code{pval_exhaustive}, or \code{pval_flexible}.}
+\item{x}{Object of class \code{"multfourier"} returned by
+\code{\link{pval_fourier}}, \code{\link{pval_exact}} or
+\code{\link{pval_flexible}}.}
 
 \item{...}{Additional arguments (currently unused).}
 }
 \value{
-Invisibly returns the input object.
+Invisibly returns \code{x}.
 }
 \description{
-Print method for multfourier objects
+Prints the method, statistic, \pvalue{}, status and total runtime and, for the
+Fourier method, also the tilt \code{gamma}, the time spent choosing it, the
+period half-width \code{W} and the number of terms.
+}
+\examples{
+p <- c(0.1, 0.2, 0.3, 0.4)
+x <- c(35, 30, 60, 75)
+
+# Fourier method: also shows gamma, W and the number of terms
+fit_fourier <- pval_fourier(x, p, stat = "llr")
+fit_fourier              # same as print(fit_fourier)
+
+# Exact method
+fit_exact <- pval_exact(x, p, stat = "llr")
+fit_exact
 }

@@ -468,8 +468,14 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
     phase_tables(mult, stride_n, lane, step_z);
 
     void* plan = NULL;
+    if (!options->poisson) {
+        mult_res->Q = -1;
+        mult_res->DQ_relative = NAN;
+    }
     if (options->poisson) {
         plan = build_poisson_plan(mult, verbose);  // never builds the merge-factor plan it replaces
+        mult_res->Q = ((poisson_plan_t*)plan)->Q;
+        mult_res->DQ_relative = ((poisson_plan_t*)plan)->alias_rel;
     }
     else if (options->use_fft_precompute) {
         switch (options->fft_precision) {
@@ -682,22 +688,7 @@ static void series(multinomial* mult, multinomial_result* mult_res, options_t* o
 
     finish:
 
-    // Both guarded by eps_have: the early exits above (underflow to zero, non-finite partial sum)
-    // jump here without ever writing sums_arr or feeding the extrapolator, and must keep their p.
-    if (eps_have && options->average_window > 0) {
-        quad_t p_average = 0;
-        double weight = 0.0;
-        const int_t window = (int_t)(options->average_window*iter);
-        for (int_t i=0; i<=window; i++) {
-            const int_t j = iter-window+i;
-            const double w = options->average_flat? 1.0:(double)i+1;
-            p_average += sums_arr[j]*w;
-            weight += w;
-        }
-        p_average /= weight;
-        p = p_average;
-    }
-    else if (eps_have && options->extrapolate >= 2 && last_smooth_iter >= 0) {
+    if (eps_have && options->extrapolate >= 2 && last_smooth_iter >= 0) {
         // Prefer the same robust (shallow-table, median-smoothed) statistic that justified
         // stopping over the deep depth-50 table below: that table can itself land on a bad
         // extrapolate at an unlucky iteration (see extrapolate.h and latex/poisson.tex), and

@@ -25,10 +25,15 @@ print(fit_terms)
 fit_time <- pval_fourier(x, p, max_time = 0.0001, max_terms = 1e6)
 print(fit_time)
 
-# 5. Promedio de cola en ventana (plano vs ponderado)
-fit_w_flat <- pval_fourier(x, p, avg_window = 0.2, avg_flat = TRUE)
-fit_w_pond <- pval_fourier(x, p, avg_window = 0.2, avg_flat = FALSE)
-c(sin_ventana = fit$pval, plana = fit_w_flat$pval, ponderada = fit_w_pond$pval)
+# 5. exact_terms: evaluador Poisson vs convolución polinomial exacta
+fit_poisson <- pval_fourier(x, p, exact_terms = FALSE)
+fit_exact_t <- pval_fourier(x, p, exact_terms = TRUE)
+c(poisson = fit_poisson$pval, exact_terms = fit_exact_t$pval)
+stopifnot(isTRUE(all.equal(fit_poisson$pval, fit_exact_t$pval, tolerance = 1e-3)))
+
+# 5.1 Verificación de nuevos outputs Q y D_Q en Fourier
+stopifnot(!is.null(fit$Q), !is.null(fit$D_Q))
+cat(sprintf("Diagnósticos Fourier: Q = %s, D_Q = %s\n", fit$Q, fit$D_Q))
 
 # 6. Variación de undersampling
 fit_u05 <- pval_fourier(x, p, undersampling = 0.5)
@@ -42,12 +47,25 @@ print(fit_th)
 # 8. Bisección exhaustiva y método flexible
 x_small <- c(3, 2, 4)
 p_small <- c(0.3, 0.3, 0.4)
-fit_ex <- pval_exhaustive(x_small, p_small)
+fit_ex <- pval_exact(x_small, p_small)
 fit_fl <- pval_flexible(x_small, p_small)
 
-# 9. Manejo de inestabilidad/explosión numérica (status = 4 sin crash de R)
-fit_bad <- pval_fourier(x, p, stat = "pd", lambda = -1)
+# En pval_exact Q y D_Q deben ser NA
+stopifnot(is.na(fit_ex$Q), is.na(fit_ex$D_Q))
+
+# 9. lambda <= -1 no está soportado: debe dar un error claro
+fit_bad <- tryCatch(pval_fourier(x, p, stat = "pd", lambda = -1), error = function(e) conditionMessage(e))
 print(fit_bad)
+stopifnot(grepl("strictly greater than -1", fit_bad))
+fit_bad2 <- tryCatch(pval_fourier(x, p, stat = "pd", lambda = -2), error = function(e) conditionMessage(e))
+stopifnot(grepl("strictly greater than -1", fit_bad2))
+
+# 9b. p que no suma 1: error por defecto; con rescale_p = TRUE se reescala (como chisq.test)
+err_p <- tryCatch(pval_exact(x_small, c(3, 3, 4)), error = function(e) conditionMessage(e))
+print(err_p)
+stopifnot(grepl("must sum to 1", err_p))
+fit_resc <- pval_exact(x_small, c(3, 3, 4), rescale_p = TRUE)
+stopifnot(isTRUE(all.equal(fit_resc$pval, fit_ex$pval)), isTRUE(all.equal(fit_resc$p, p_small)))
 
 # 10. Tests de la vignette (Escuela Centenario y leave-one-out)
 votes <- matrix(

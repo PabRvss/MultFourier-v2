@@ -3,8 +3,6 @@
 typedef enum {
     FFT_NONE,
     FFT_REAL,
-    FFT_DD,
-    FFT_QUAD,
 } fft_precision_t;
 
 typedef struct {
@@ -29,9 +27,6 @@ typedef struct {
     int_t fast_exhaustive;  // 1 = per-node bounds pruning, 0 = bisection in last two categories
     int_t extrapolate;      // 0 = off, 1 = report extrapolated, 2 = stop on error estimate
 
-    int_t average_flat;
-    real_t average_window;
-
     int_t threads;
     int_t vecs_per_thread;
 
@@ -47,11 +42,11 @@ static void set_options_default(options_t* options) {
 
     options->eps_rel = 1e-3;
     options->max_iter = 10000;
-    options->B = 30;
+    options->B = 50;
     options->undersampling = 1.0;
 
     options->eps_gamma = 1e-2;
-    options->enum_cutoff = 7.4;
+    options->enum_cutoff = 10.0;
 
     options->gamma_newton = 1;
     options->poisson = 1;
@@ -63,9 +58,6 @@ static void set_options_default(options_t* options) {
     options->fft_precision = FFT_REAL;
     options->use_fft_precompute = 1;
     options->error_bound = 0;
-
-    options->average_flat = 0;
-    options->average_window = 0.0;
 
     options->threads = 1;
     options->vecs_per_thread = 1;

@@ -264,6 +264,7 @@ typedef struct {
     const real_t* restrict reward;
     const real_t* restrict log_prob;
     real_t logp_acc;
+    real_t r_start;
     atomic_int_fast64_t* restrict next_n0;
     real_t p_acc;
     const options_t* options;
@@ -314,7 +315,7 @@ static void* iterative_bisection_thread(void* args_void) {
         }
         const int_t n0_end = n0_start + BISECT_CHUNK - 1 > N ? N : n0_start + BISECT_CHUNK - 1;
         for (int_t n0 = n0_start; n0 <= n0_end; n0++) {
-            const real_t r0 = args->reward[n0];
+            const real_t r0 = args->r_start + args->reward[n0];
             const real_t logp0 = args->logp_acc + args->log_prob[n0];
             iterative_bisection_core(args->N, K, args->reward, args->log_prob, &p_acc, 1, N-n0, r0, logp0,
                                       N_remain, r_acc, logp_acc, n_cur);
@@ -336,6 +337,7 @@ static void iterative_bisection_parallel(
         const real_t* restrict reward,
         const real_t* restrict log_prob,
         real_t logp_acc,
+        const real_t r_start,
         real_t* restrict p_acc,
         const int_t threads,
         const options_t* options,
@@ -362,7 +364,7 @@ static void iterative_bisection_parallel(
             logp_acc_buf = malloc(K*sizeof(real_t));
             n_cur = malloc(K*sizeof(int_t));
         }
-        iterative_bisection_core(N, K, reward, log_prob, p_acc, 0, N, 0, logp_acc,
+        iterative_bisection_core(N, K, reward, log_prob, p_acc, 0, N, r_start, logp_acc,
                                   N_remain, r_acc, logp_acc_buf, n_cur);
         if (K > BISECT_MAX_DEPTH) { free(N_remain); free(r_acc); free(logp_acc_buf); free(n_cur); }
         return;
@@ -382,6 +384,7 @@ static void iterative_bisection_parallel(
         args[t].reward = reward;
         args[t].log_prob = log_prob;
         args[t].logp_acc = logp_acc;
+        args[t].r_start = r_start;
         args[t].next_n0 = &next_n0;
         args[t].p_acc = 0;
         args[t].options = options;
@@ -423,10 +426,11 @@ static void exhaustive_bisection(multinomial* mult, multinomial_result* mult_res
 
     real_t p_acc = 0;
     const real_t logp_acc = lgac[N];
+    const real_t r_start = -exhaustive_tie_tolerance(mult);  // accept S - S0 <= tau: exact ties count
     atomic_int timed_out;
     atomic_init(&timed_out, 0);
-    if (options->threads > 1) iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, &p_acc, options->threads, options, &timed_out);
-    else iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, &p_acc, 1, options, &timed_out);
+    if (options->threads > 1) iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, r_start, &p_acc, options->threads, options, &timed_out);
+    else iterative_bisection_parallel(N, K, reward, log_prob, logp_acc, r_start, &p_acc, 1, options, &timed_out);
 
     if (atomic_load(&timed_out)) {
         mult_res->status = 1;
