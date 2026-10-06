@@ -72,7 +72,7 @@ integer, capped at the number of available cores). Default
 \code{min(2L, parallel::detectCores())}.}
 
 \item{exact_terms}{Logical; if \code{FALSE} (default), evaluates the Fourier
-terms using the fast Poissonised Cauchy-integral evaluator. If \code{TRUE},
+terms using the fast Poissonized Cauchy-integral evaluator. If \code{TRUE},
 evaluates each term exactly via polynomial convolution.}
 
 \item{precompute}{Logical; if \code{TRUE} (default), precomputes the FFT plan
@@ -124,13 +124,23 @@ An object of class \code{"multfourier"}: a list with components
   \item{nu_max_ratio}{Largest size of the late transform values relative to
     the first one; values near 1 mean the terms are not decaying (a lattice-like
     statistic).}
-  \item{Q}{Number of quadrature points (FFT grid size) for the Poissonised
-    evaluator.}
-  \item{D_Q}{Relative aliasing error estimate for \code{Q}.}
+  \item{Q}{Number of equispaced points on the saddlepoint circle used to
+    extract the multinomial coefficient in each term of the series (a
+    \eqn{Q}{Q}-point trapezoid rule for Cauchy's integral). It is chosen
+    automatically, by doubling from a power of two until the aliasing
+    certificate \code{D_Q} falls below \eqn{10^{-10}}{1e-10}. \code{NA} with
+    \code{exact_terms = TRUE}.}
+  \item{D_Q}{Aliasing certificate \eqn{D(Q)}{D(Q)}: the relative change in
+    the first term of the series when \code{Q} is doubled, which bounds from
+    below, and typically estimates closely, the relative aliasing error of
+    every term. It measures an error separate from the truncation of the
+    series, which \code{err_rel_ext} and \code{err_rel_est} report. It is
+    \code{0} when \code{Q} is large enough for the rule to be exact, and
+    \code{NA} with \code{exact_terms = TRUE}.}
 }
-The last six components (\code{err_rel_ext}, \code{err_rel_est},
-\code{n_eff}, \code{nu_max_ratio}, \code{Q} and \code{D_Q}) are diagnostics
-of the series. The names \code{Gamma} and \code{Time_gamma} used by earlier
+The last six components are diagnostics of the series. The four about
+truncation (\code{err_rel_ext}, \code{err_rel_est}, \code{n_eff} and
+\code{nu_max_ratio}) are heuristics, not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
 versions still work, with a deprecation warning.
 }
 \description{
@@ -179,7 +189,7 @@ window covering the last half of the terms. The reported \pvalue{} is the last
 smoothed extrapolated value.
 
 \strong{Term evaluation.} With \code{exact_terms = FALSE} (default), terms are
-evaluated via a Poissonised Cauchy-integral evaluator, which is significantly
+evaluated via a Poissonized Cauchy-integral evaluator, which is significantly
 faster on large instances. With \code{exact_terms = TRUE}, terms are evaluated
 via exact polynomial convolution.
 }

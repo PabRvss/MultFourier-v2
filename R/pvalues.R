@@ -67,6 +67,24 @@ diag_val <- function(v) if (is.null(v)) NA_real_ else as.numeric(v)
 # Nombres antiguos de componentes, aceptados con aviso (usar los nuevos)
 multfourier_old_names <- c(Gamma = "gamma", Time_gamma = "time_gamma")
 
+# Argumentos eliminados en esta version: se descartan con un aviso en vez de
+# pasar en silencio al motor C (que los ignoraria)
+removed_args <- c(
+  engine = "'engine' has been removed and is ignored: the former \"speedup\" engine is always used (for Fourier terms by polynomial convolution, see 'exact_terms').",
+  speedup = "'speedup' has been removed and is ignored; see 'exact_terms'.",
+  precision = "'precision' has been removed and is ignored: terms are evaluated in double precision.",
+  avg_window = "'avg_window' has been removed and is ignored: the reported value is the extrapolated one.",
+  avg_flat = "'avg_flat' has been removed and is ignored."
+)
+
+drop_removed_args <- function(dots) {
+  nm <- names(dots)
+  if (is.null(nm)) return(dots)
+  hit <- nm %in% names(removed_args)
+  for (a in unique(nm[hit])) warning(removed_args[[a]], call. = FALSE)
+  dots[!hit]
+}
+
 #' @export
 `$.multfourier` <- function(x, name) {
   if (name %in% names(multfourier_old_names)) {
@@ -190,7 +208,7 @@ resolve_n_threads <- function(n_threads) {
 #'   integer, capped at the number of available cores). Default
 #'   \code{min(2L, parallel::detectCores())}.
 #' @param exact_terms Logical; if \code{FALSE} (default), evaluates the Fourier
-#'   terms using the fast Poissonised Cauchy-integral evaluator. If \code{TRUE},
+#'   terms using the fast Poissonized Cauchy-integral evaluator. If \code{TRUE},
 #'   evaluates each term exactly via polynomial convolution.
 #' @param precompute Logical; if \code{TRUE} (default), precomputes the FFT plan
 #'   when evaluating terms via polynomial convolution (\code{exact_terms = TRUE}).
@@ -239,7 +257,7 @@ resolve_n_threads <- function(n_threads) {
 #' smoothed extrapolated value.
 #'
 #' \strong{Term evaluation.} With \code{exact_terms = FALSE} (default), terms are
-#' evaluated via a Poissonised Cauchy-integral evaluator, which is significantly
+#' evaluated via a Poissonized Cauchy-integral evaluator, which is significantly
 #' faster on large instances. With \code{exact_terms = TRUE}, terms are evaluated
 #' via exact polynomial convolution.
 #'
@@ -279,13 +297,23 @@ resolve_n_threads <- function(n_threads) {
 #'   \item{nu_max_ratio}{Largest size of the late transform values relative to
 #'     the first one; values near 1 mean the terms are not decaying (a lattice-like
 #'     statistic).}
-#'   \item{Q}{Number of quadrature points (FFT grid size) for the Poissonised
-#'     evaluator.}
-#'   \item{D_Q}{Relative aliasing error estimate for \code{Q}.}
+#'   \item{Q}{Number of equispaced points on the saddlepoint circle used to
+#'     extract the multinomial coefficient in each term of the series (a
+#'     \eqn{Q}{Q}-point trapezoid rule for Cauchy's integral). It is chosen
+#'     automatically, by doubling from a power of two until the aliasing
+#'     certificate \code{D_Q} falls below \eqn{10^{-10}}{1e-10}. \code{NA} with
+#'     \code{exact_terms = TRUE}.}
+#'   \item{D_Q}{Aliasing certificate \eqn{D(Q)}{D(Q)}: the relative change in
+#'     the first term of the series when \code{Q} is doubled, which bounds from
+#'     below, and typically estimates closely, the relative aliasing error of
+#'     every term. It measures an error separate from the truncation of the
+#'     series, which \code{err_rel_ext} and \code{err_rel_est} report. It is
+#'     \code{0} when \code{Q} is large enough for the rule to be exact, and
+#'     \code{NA} with \code{exact_terms = TRUE}.}
 #' }
-#' The last six components (\code{err_rel_ext}, \code{err_rel_est},
-#' \code{n_eff}, \code{nu_max_ratio}, \code{Q} and \code{D_Q}) are diagnostics
-#' of the series. The names \code{Gamma} and \code{Time_gamma} used by earlier
+#' The last six components are diagnostics of the series. The four about
+#' truncation (\code{err_rel_ext}, \code{err_rel_est}, \code{n_eff} and
+#' \code{nu_max_ratio}) are heuristics, not error bounds. The names \code{Gamma} and \code{Time_gamma} used by earlier
 #' versions still work, with a deprecation warning.
 #'
 #' @references
@@ -361,9 +389,9 @@ pval_fourier <- function(x,
     poisson = if (isTRUE(exact_terms)) 0L else 1L,
     precompute = as.logical(precompute),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
-    verbose = as.logical(verbose),
-    ...
+    verbose = as.logical(verbose)
   )
+  opts <- c(opts, drop_removed_args(list(...)))
 
   t0 <- proc.time()
   raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
@@ -471,9 +499,9 @@ pval_exact <- function(x,
     lambda = st$lambda,
     n_threads = as.integer(threads_val),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
-    verbose = as.logical(verbose),
-    ...
+    verbose = as.logical(verbose)
   )
+  opts <- c(opts, drop_removed_args(list(...)))
 
   t0 <- proc.time()
   raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
@@ -564,6 +592,9 @@ pval_flexible <- function(x,
   if (rel_eps < 0) stop("'rel_eps' must be non-negative.")
   if (B < 0) stop("'B' must be an integer greater than or equal to 0.")
   if (max_terms <= 0) stop("'max_terms' must be a positive integer.")
+  if (!is.logical(exact_terms) || length(exact_terms) != 1L || is.na(exact_terms)) {
+    stop("'exact_terms' must be TRUE or FALSE.")
+  }
 
   st <- resolve_stat_lambda(stat, lambda)
   threads_val <- resolve_n_threads(n_threads)
@@ -582,9 +613,9 @@ pval_flexible <- function(x,
     poisson = if (isTRUE(exact_terms)) 0L else 1L,
     precompute = as.logical(precompute),
     max_time = if (!is.null(max_time) && is.finite(max_time)) as.numeric(max_time) else -1.0,
-    verbose = as.logical(verbose),
-    ...
+    verbose = as.logical(verbose)
   )
+  opts <- c(opts, drop_removed_args(list(...)))
 
   t0 <- proc.time()
   raw <- .Call(c_run_multfourier, as.double(x), as.double(p), opts)
